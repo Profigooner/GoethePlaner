@@ -5,7 +5,13 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from agentboard.app.models import AgentRole, AgentState, Task
+from agentboard.app.models import (
+    AgentRole,
+    AgentState,
+    AgentStatus,
+    Project,
+    Task,
+)
 from agentboard.app.utils.config import AppConfig
 
 
@@ -18,6 +24,28 @@ class ModelTests(unittest.TestCase):
 
         self.assertEqual(agent.progress, 100)
         self.assertEqual(task.overall_progress, 0)
+
+    def test_project_owns_tasks_and_reports_active_count(self) -> None:
+        project = Project("Demo", Path("/tmp/demo"))
+        task = Task(Path("/tmp/other"), "Build it", "Build it")
+
+        project.add_task(task)
+
+        self.assertEqual(task.project_id, project.id)
+        self.assertEqual(task.repository, project.repo_path)
+        self.assertEqual(project.active_task_count, 1)
+        task.finish(task.status.COMPLETED)
+        self.assertEqual(project.active_task_count, 0)
+
+    def test_agent_run_fields_capture_logs_and_timing(self) -> None:
+        agent = AgentState(AgentRole.BACKEND, "Backend Agent")
+        agent.update(status=AgentStatus.RUNNING, message="Working")
+        agent.append_log("First line")
+        agent.update(status=AgentStatus.DONE)
+
+        self.assertEqual(agent.logs, ["First line"])
+        self.assertIsNotNone(agent.started_at)
+        self.assertIsNotNone(agent.finished_at)
 
 
 class ConfigTests(unittest.TestCase):
@@ -41,4 +69,3 @@ class ConfigTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

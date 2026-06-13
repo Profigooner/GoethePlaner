@@ -65,6 +65,7 @@ class WorkflowWorker(QObject):
     def _run_pipeline(self) -> None:
         self.task.agents = self._create_agents()
         for agent in self.task.agents:
+            agent.task_id = self.task.id
             self.agent_changed.emit(replace(agent))
 
         optimizer_agent = self.task.agents[0]
@@ -204,6 +205,8 @@ class WorkflowWorker(QObject):
             self.task.set_progress(task_progress)
             self.task_changed.emit(self.task.status.value, task_progress)
             self._emit_event(EventKind.LOG, message, agent.name)
+            agent.append_log(message)
+            self.agent_changed.emit(replace(agent))
 
         agent.update(
             status=AgentStatus.DONE,

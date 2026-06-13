@@ -55,7 +55,11 @@ class AgentDispatcher:
                     f"{subtask.title}\n{subtask.description}"
                 ),
                 cancel_event=cancel_event,
-                on_log=lambda message, name=agent.name: on_log(name, message),
+                on_log=lambda message, name=agent.name, current=agent: (
+                    current.append_log(message),
+                    on_log(name, message),
+                    on_agent(replace(current)),
+                ),
                 on_progress=lambda progress, message, current=agent: (
                     current.update(progress=progress, message=message),
                     on_agent(replace(current)),
@@ -99,4 +103,3 @@ class AgentDispatcher:
                     message="Workflow cancelled before this agent started.",
                 )
                 on_agent(replace(agent))
-

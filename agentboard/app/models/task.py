@@ -36,6 +36,7 @@ class Task:
     original_prompt: str
     name: str
     id: str = field(default_factory=lambda: uuid4().hex)
+    project_id: str | None = None
     optimized_prompt: str = ""
     subtasks: list[Subtask] = field(default_factory=list)
     agents: list[AgentState] = field(default_factory=list)
@@ -44,14 +45,30 @@ class Task:
     created_at: datetime = field(
         default_factory=lambda: datetime.now(timezone.utc)
     )
+    updated_at: datetime = field(
+        default_factory=lambda: datetime.now(timezone.utc)
+    )
     completed_at: datetime | None = None
+
+    @property
+    def title(self) -> str:
+        return self.name
+
+    @title.setter
+    def title(self, value: str) -> None:
+        self.name = value
+        self.touch()
 
     def set_progress(self, value: int) -> None:
         self.overall_progress = max(0, min(100, value))
+        self.touch()
 
     def finish(self, status: TaskStatus) -> None:
         self.status = status
         self.completed_at = datetime.now(timezone.utc)
+        self.updated_at = self.completed_at
         if status in {TaskStatus.COMPLETED, TaskStatus.ACCEPTED}:
             self.overall_progress = 100
 
+    def touch(self) -> None:
+        self.updated_at = datetime.now(timezone.utc)

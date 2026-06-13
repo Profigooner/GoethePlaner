@@ -165,8 +165,52 @@ Verification: the documented launch path works and the complete test suite passe
 
 ## Current Status
 
-- Active stage: Complete
+- Active stage: Stage 9, UI/UX redesign
 - Last completed stage: Stage 8, Documentation and release verification
-- Verification: all 14 unit, integration, workflow, and offscreen UI tests pass;
-  all Python modules compile; `git diff --check` reports no whitespace errors.
-- Completed: June 13, 2026
+- Redesign started: June 14, 2026
+
+## Stage 9: UI/UX Redesign
+
+The redesign follows [UI_SPEC.md](UI_SPEC.md) and
+[docs/ui-concept.png](docs/ui-concept.png).
+
+### Phase 9.1: Specification
+
+- [x] Inspect the existing UI, architecture, roadmap, and README.
+- [x] Render the existing desktop UI as a baseline.
+- [x] Generate a complete desktop design concept.
+- [x] Define design tokens, hierarchy, components, and implementation order in
+  `UI_SPEC.md`.
+
+### Phase 9.2: Models and project navigation
+
+- [ ] Add a backward-compatible `Project` model and task ownership fields.
+- [ ] Add in-memory project selection and task collections.
+- [ ] Implement the New Project dialog and sidebar navigation.
+
+### Phase 9.3: Workspace architecture
+
+- [ ] Replace the permanent task form with a project header and New Task dialog.
+- [ ] Add a task rail with reusable task cards.
+- [ ] Compose the task detail and persistent inspector regions.
+
+### Phase 9.4: Visual system and components
+
+- [ ] Add centralized theme tokens and application QSS.
+- [ ] Add glass panels, status badges, toolbar buttons, and empty states.
+- [ ] Redesign agent cards with activity, log preview, elapsed time, and result.
+- [ ] Polish logs, prompts, subtasks, files, diff, tests, and review views.
+
+### Phase 9.5: Verification and documentation
+
+- [ ] Preserve all mock, OpenCode, worker, Git, test, accept, and reject flows.
+- [ ] Add project/navigation/dialog coverage.
+- [ ] Run unit, integration, workflow, and offscreen UI tests.
+- [ ] Render and compare desktop screenshots at target sizes.
+- [ ] Update README and `NIGHTLY_LOG.md`.
+
+### Redesign Milestone
+
+| Milestone | Definition | Status |
+| --- | --- | --- |
+| M6 Premium desktop UI | Project-first glass dashboard with verified workflows | In progress |
