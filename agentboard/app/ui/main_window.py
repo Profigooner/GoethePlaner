@@ -43,7 +43,7 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("GoethePlaner")
         self.setStyleSheet(application_stylesheet())
         self.resize(1500, 920)
-        self.setMinimumSize(1180, 720)
+        self.setMinimumSize(1280, 720)
 
         self.dashboard.new_project_requested.connect(self._new_project)
         self.dashboard.project_selected.connect(self._select_project)

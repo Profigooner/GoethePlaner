@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QPushButton,
     QScrollArea,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
@@ -34,6 +35,10 @@ class ProjectRow(QFrame):
         self.path_label = QLabel(self._short_path(project.repo_path))
         self.path_label.setObjectName("mutedText")
         self.path_label.setToolTip(str(project.repo_path))
+        self.path_label.setMaximumWidth(160)
+        self.path_label.setSizePolicy(
+            QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred
+        )
         self.status_dot = QLabel("●")
         self.status_dot.setAlignment(Qt.AlignmentFlag.AlignTop)
         self.task_count = QLabel()
@@ -42,11 +47,11 @@ class ProjectRow(QFrame):
         header = QHBoxLayout()
         header.addWidget(self.name_label)
         header.addStretch()
+        header.addWidget(self.task_count)
         header.addWidget(self.status_dot)
 
         footer = QHBoxLayout()
         footer.addWidget(self.path_label, 1)
-        footer.addWidget(self.task_count)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(11, 9, 11, 9)
@@ -100,7 +105,7 @@ class ProjectRow(QFrame):
     @staticmethod
     def _short_path(path: Path) -> str:
         text = str(path)
-        if len(text) <= 28:
+        if len(text) <= 22:
             return text
         return f"…/{path.parent.name}/{path.name}"
 

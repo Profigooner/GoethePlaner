@@ -11,8 +11,12 @@ from .theme import THEME, fixed_font
 class LogViewer(QPlainTextEdit):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
+        self._entries: list[tuple[str, str, str]] = []
+        self._source_filter = ""
+        self._search_filter = ""
         self.setReadOnly(True)
         self.setMaximumBlockCount(10_000)
+        self.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
         self.setFont(fixed_font(11))
         self.setPlaceholderText("Live agent output will appear here.")
         self.setStyleSheet(
@@ -24,12 +28,48 @@ class LogViewer(QPlainTextEdit):
 
     def append_event(self, event: WorkflowEvent) -> None:
         timestamp = event.timestamp.astimezone().strftime("%H:%M:%S")
-        self._append_parts(timestamp, event.source, event.message)
+        self._append_entry(timestamp, event.source, event.message)
 
     def append_line(self, source: str, message: str) -> None:
-        self._append_parts("--:--:--", source, message)
+        self._append_entry("--:--:--", source, message)
 
-    def _append_parts(self, timestamp: str, source: str, message: str) -> None:
+    def clear(self) -> None:
+        self._entries.clear()
+        super().clear()
+
+    def set_source_filter(self, value: str) -> None:
+        self._source_filter = "" if value == "All Sources" else value
+        self._render_entries()
+
+    def set_search_filter(self, value: str) -> None:
+        self._search_filter = value.strip().casefold()
+        self._render_entries()
+
+    def _append_entry(
+        self, timestamp: str, source: str, message: str
+    ) -> None:
+        self._entries.append((timestamp, source, message))
+        if self._matches(source, message):
+            self._insert_parts(timestamp, source, message)
+
+    def _render_entries(self) -> None:
+        super().clear()
+        for timestamp, source, message in self._entries:
+            if self._matches(source, message):
+                self._insert_parts(timestamp, source, message)
+
+    def _matches(self, source: str, message: str) -> bool:
+        if self._source_filter and (
+            self._source_filter.casefold() not in source.casefold()
+        ):
+            return False
+        if self._search_filter and (
+            self._search_filter not in f"{source} {message}".casefold()
+        ):
+            return False
+        return True
+
+    def _insert_parts(self, timestamp: str, source: str, message: str) -> None:
         cursor = self.textCursor()
         cursor.movePosition(QTextCursor.MoveOperation.End)
         muted = QTextCharFormat()
@@ -59,4 +99,3 @@ class LogViewer(QPlainTextEdit):
         if "error" in normalized:
             return THEME.error
         return THEME.text_primary
-

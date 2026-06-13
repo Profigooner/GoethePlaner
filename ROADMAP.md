@@ -203,14 +203,23 @@ The redesign follows [UI_SPEC.md](UI_SPEC.md) and
 
 ### Phase 9.5: Verification and documentation
 
-- [ ] Preserve all mock, OpenCode, worker, Git, test, accept, and reject flows.
-- [ ] Add project/navigation/dialog coverage.
-- [ ] Run unit, integration, workflow, and offscreen UI tests.
-- [ ] Render and compare desktop screenshots at target sizes.
-- [ ] Update README and `NIGHTLY_LOG.md`.
+- [x] Preserve all mock, OpenCode, worker, Git, test, accept, and reject flows.
+- [x] Add project/navigation/dialog coverage.
+- [x] Run unit, integration, workflow, and offscreen UI tests.
+- [x] Render and compare desktop screenshots at target sizes.
+- [x] Update README and `NIGHTLY_LOG.md`.
 
 ### Redesign Milestone
 
 | Milestone | Definition | Status |
 | --- | --- | --- |
-| M6 Premium desktop UI | Project-first glass dashboard with verified workflows | In progress |
+| M6 Premium desktop UI | Project-first glass dashboard with verified workflows | Complete |
+
+### Redesign Verification
+
+- 18 unit, integration, workflow, and offscreen Qt tests pass.
+- Python compilation and whitespace checks pass.
+- The concept-sized `1586x992` render uses two agent columns.
+- The compact `1440x900` render switches to one readable agent column.
+- Final implementation screenshot: `docs/goetheplaner-dashboard.png`.
+- Completed: June 14, 2026.

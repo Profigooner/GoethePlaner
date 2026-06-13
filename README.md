@@ -1,20 +1,44 @@
-# AgentBoard
+# GoethePlaner
 
-AgentBoard is a local PySide6 desktop application for managing OpenCode-based
-multi-agent coding tasks. It improves a rough task prompt, creates specialized
-subtasks, runs agents without blocking the GUI, streams logs and progress, shows
-Git changes, runs tests, and provides an explicit accept or reject decision.
+GoethePlaner is a local PySide6 control center for OpenCode-based multi-agent
+coding work. Projects connect local repositories, tasks describe desired code
+changes, and specialized agents optimize prompts, plan work, implement changes,
+run tests, and review results without blocking the desktop UI.
 
-The MVP can run entirely in mock mode, so OpenCode is optional.
+The application can run entirely in mock mode, so OpenCode is optional.
+
+![GoethePlaner project dashboard](docs/goetheplaner-dashboard.png)
+
+The visual implementation follows [UI_SPEC.md](UI_SPEC.md). The generated design
+reference is available at [docs/ui-concept.png](docs/ui-concept.png).
+
+## Workflow
+
+```text
+Project
+  -> Tasks
+    -> Prompt Optimizer, Planner, Backend, Frontend, Tester, Reviewer
+      -> Logs, Prompt, Subtasks, Changed Files, Diff, Tests, Review
+```
+
+1. Create a project and select its local repository.
+2. Create a task inside the selected project.
+3. Choose `Auto`, `Mock`, or `OpenCode`.
+4. Monitor overall and per-agent progress.
+5. Inspect logs, optimized prompt, subtasks, changed files, diff, and tests.
+6. Accept or reject the generated result.
+
+Projects and tasks are stored in memory in the current release.
 
 ## Features
 
-- Local repository folder selection
-- Deterministic prompt clarification and task planning
+- Dark translucent project-first desktop dashboard
+- In-memory project navigation and task collections
+- Focused New Project and New Task dialogs
 - Prompt Optimizer, Planner, Backend, Frontend, Tester, and Reviewer agents
+- Per-agent activity, progress, log preview, elapsed time, and result state
 - Responsive `QThread` workflow with Qt signals and slots
-- Per-agent and overall progress
-- Live stdout/stderr logs
+- Live stdout/stderr logs with source-aware colors
 - Configurable OpenCode CLI adapter
 - Automatic mock fallback when OpenCode is unavailable
 - Git status, changed-file, staged diff, and working-tree diff views
@@ -43,23 +67,18 @@ source .venv/bin/activate
 python -m agentboard
 ```
 
-Then:
+The Python package retains the internal `agentboard` name for compatibility, but
+the desktop product name is GoethePlaner.
 
-1. Select a local repository.
-2. Enter a programming task.
-3. Choose `Mock`, `Auto`, or `OpenCode`.
-4. Select **Create Task**.
-5. Review the optimized prompt, subtasks, logs, changed files, and diff.
-6. Run an explicit test command if needed.
-7. Accept or reject the result.
+## Execution Modes
 
-`Auto` uses OpenCode when the configured executable is available and otherwise
-uses the mock runner. `OpenCode` reports an error when the executable cannot be
-found. `Mock` never invokes OpenCode.
+- `Auto`: uses OpenCode when the configured executable is available and
+  otherwise uses the mock runner.
+- `Mock`: runs a simulated local workflow and never invokes OpenCode.
+- `OpenCode`: requires the configured OpenCode executable and reports a clear
+  error when it is unavailable.
 
 ## Configuration
-
-Configuration is read from environment variables:
 
 | Variable | Purpose | Default |
 | --- | --- | --- |
@@ -67,7 +86,7 @@ Configuration is read from environment variables:
 | `AGENTBOARD_MOCK_DELAY` | Seconds per mock progress step | `0.2` |
 | `AGENTBOARD_TEST_COMMAND` | Initial test command shown in the UI | Empty |
 
-Supported OpenCode command placeholders are:
+Supported OpenCode command placeholders:
 
 - `{repo_path}`
 - `{agent_name}`
@@ -76,7 +95,6 @@ Supported OpenCode command placeholders are:
 Example:
 
 ```bash
-export AGENTBOARD_OPENCODE_COMMAND='opencode run --dir {repo_path} --agent {agent_name} {prompt}'
 export AGENTBOARD_TEST_COMMAND='python -m unittest discover -v'
 python -m agentboard
 ```
@@ -86,7 +104,7 @@ with `shell=False`.
 
 ## Safety
 
-- AgentBoard does not store API keys.
+- GoethePlaner does not store API keys.
 - It does not commit, push, reset a repository, or run a shell.
 - Accept only records a local decision.
 - A Git baseline is captured before executable agents start.
@@ -96,19 +114,20 @@ with `shell=False`.
 - Pre-existing untracked and modified files are restored to their captured
   content.
 
-Do not edit the same files outside AgentBoard while a task is running. Concurrent
-edits made after baseline capture cannot be distinguished from agent changes.
+Do not edit the same files outside GoethePlaner while a task is running.
+Concurrent edits made after baseline capture cannot be distinguished from agent
+changes.
 
 ## Tests
 
 ```bash
 source .venv/bin/activate
-python -m unittest discover -v
+QT_QPA_PLATFORM=offscreen python -m unittest discover -v
 ```
 
-The suite covers models, configuration, prompt planning, runner selection, Git
-inspection, baseline restoration, test streaming, the complete mock workflow,
-and offscreen Qt window construction.
+The suite covers models, project ownership, dialogs, configuration, prompt
+planning, runner selection, Git inspection, baseline restoration, test
+streaming, complete mock workflows, and headless Qt window construction.
 
 ## Architecture
 
@@ -116,14 +135,19 @@ and offscreen Qt window construction.
 agentboard/
   main.py
   app/
-    ui/       PySide6 widgets only
-    core/     Workflow, OpenCode, Git, and test services
-    models/   Qt-independent task and agent state
-    utils/    Configuration and logging
+    ui/
+      theme.py          Centralized design tokens and QSS
+      components.py     Glass panels, badges, progress, empty states
+      sidebar.py        Project navigation
+      task_card.py      Task rail cards
+      agent_card.py     Live agent execution cards
+      dialogs.py        New Project and New Task flows
+      task_dashboard.py Main screen composition
+    core/               Workflow, OpenCode, Git, and test services
+    models/             Project, task, agent, and event state
+    utils/              Configuration and logging
 tests/
-ROADMAP.md
 ```
 
-See [ROADMAP.md](ROADMAP.md) for implementation order, boundaries, milestone
-status, and safety decisions.
+See [ROADMAP.md](ROADMAP.md) for milestones and safety boundaries.
 

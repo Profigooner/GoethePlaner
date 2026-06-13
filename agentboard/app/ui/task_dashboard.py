@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QTimer, Qt, Signal
 from PySide6.QtWidgets import (
     QComboBox,
     QFrame,
@@ -52,6 +52,7 @@ class TaskDashboard(QWidget):
         self.task_cards: dict[str, TaskCard] = {}
         self.current_task: Task | None = None
         self.current_project: Project | None = None
+        self.agent_columns = 2
 
         self._create_compatibility_controls()
         self.sidebar = ProjectSidebar()
@@ -95,7 +96,7 @@ class TaskDashboard(QWidget):
         workspace_splitter.setStretchFactor(0, 0)
         workspace_splitter.setStretchFactor(1, 1)
         workspace_splitter.setStretchFactor(2, 0)
-        workspace_splitter.setSizes([285, 570, 455])
+        workspace_splitter.setSizes([260, 550, 430])
 
         right = QWidget()
         right_layout = QVBoxLayout(right)
@@ -109,7 +110,7 @@ class TaskDashboard(QWidget):
         layout.setSpacing(10)
         layout.addWidget(self.sidebar, 0)
         layout.addWidget(right, 1)
-        self.sidebar.setFixedWidth(238)
+        self.sidebar.setFixedWidth(220)
 
     def _create_compatibility_controls(self) -> None:
         self.repository_edit = QLineEdit()
@@ -169,7 +170,7 @@ class TaskDashboard(QWidget):
         layout.addLayout(rail_title)
         layout.addWidget(scroll, 1)
         layout.addWidget(archive)
-        panel.setMinimumWidth(250)
+        panel.setMinimumWidth(235)
         return panel
 
     def _build_task_detail(self) -> GlassPanel:
@@ -254,17 +255,50 @@ class TaskDashboard(QWidget):
         layout = QVBoxLayout(panel)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.detail_stack)
-        panel.setMinimumWidth(550)
+        panel.setMinimumWidth(500)
         return panel
 
     def _build_inspector(self) -> GlassPanel:
         panel = GlassPanel("inspectorPanel")
         self.inspector_tabs = QTabWidget()
-        self.inspector_tabs.tabBar().setExpanding(False)
+        self.inspector_tabs.tabBar().setExpanding(True)
         self.inspector_tabs.tabBar().setUsesScrollButtons(False)
         self.inspector_tabs.tabBar().setElideMode(Qt.TextElideMode.ElideNone)
 
         self.logs = LogViewer()
+        self.log_source_combo = QComboBox()
+        self.log_source_combo.addItems(
+            [
+                "All Sources",
+                "System",
+                "Workflow",
+                "Prompt Optimizer",
+                "Planner",
+                "Backend",
+                "Frontend",
+                "Tester",
+                "Reviewer",
+            ]
+        )
+        self.log_source_combo.currentTextChanged.connect(
+            self.logs.set_source_filter
+        )
+        self.log_search_edit = QLineEdit()
+        self.log_search_edit.setPlaceholderText("Search logs…")
+        self.log_search_edit.textChanged.connect(self.logs.set_search_filter)
+        clear_logs = QPushButton("Clear")
+        clear_logs.setObjectName("ghostButton")
+        clear_logs.clicked.connect(self.logs.clear)
+        log_page = QWidget()
+        log_toolbar = QHBoxLayout()
+        log_toolbar.addWidget(self.log_source_combo)
+        log_toolbar.addWidget(self.log_search_edit, 1)
+        log_toolbar.addWidget(clear_logs)
+        log_layout = QVBoxLayout(log_page)
+        log_layout.setContentsMargins(10, 10, 10, 10)
+        log_layout.setSpacing(8)
+        log_layout.addLayout(log_toolbar)
+        log_layout.addWidget(self.logs, 1)
         self.optimized_prompt = QPlainTextEdit()
         self.optimized_prompt.setReadOnly(True)
         self.optimized_prompt.setPlaceholderText(
@@ -339,7 +373,7 @@ class TaskDashboard(QWidget):
         review_layout.addWidget(self.review_summary)
         review_layout.addStretch()
 
-        self.inspector_tabs.addTab(self.logs, "Logs")
+        self.inspector_tabs.addTab(log_page, "Logs")
         self.inspector_tabs.addTab(prompt_page, "Prompt")
         tasks_index = self.inspector_tabs.addTab(subtask_page, "Tasks")
         self.inspector_tabs.setTabToolTip(tasks_index, "Subtasks")
@@ -379,7 +413,7 @@ class TaskDashboard(QWidget):
         self.refresh_button.clicked.connect(self.refresh_repository_requested)
         self.accept_button.clicked.connect(self.accept_requested)
         self.reject_button.clicked.connect(self.reject_requested)
-        panel.setMinimumWidth(400)
+        panel.setMinimumWidth(350)
         return panel
 
     def _emit_create(self) -> None:
@@ -522,10 +556,31 @@ class TaskDashboard(QWidget):
         if card is None:
             card = AgentCard(agent)
             self.agent_cards[agent.id] = card
-            index = len(self.agent_cards) - 1
-            self.agent_layout.addWidget(card, index // 2, index % 2)
+            self._relayout_agent_cards()
         else:
             card.update_agent(agent)
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        QTimer.singleShot(0, self._relayout_agent_cards)
+
+    def _relayout_agent_cards(self) -> None:
+        if not hasattr(self, "detail_panel"):
+            return
+        columns = 2 if self.detail_panel.width() >= 540 else 1
+        if columns == self.agent_columns and all(
+            self.agent_layout.indexOf(card) >= 0
+            for card in self.agent_cards.values()
+        ):
+            return
+        self.agent_columns = columns
+        for index, card in enumerate(self.agent_cards.values()):
+            self.agent_layout.removeWidget(card)
+            self.agent_layout.addWidget(
+                card, index // columns, index % columns
+            )
+        self.agent_layout.setColumnStretch(0, 1)
+        self.agent_layout.setColumnStretch(1, 1 if columns == 2 else 0)
 
     def show_repository_state(
         self, files: list[str], diff_text: str

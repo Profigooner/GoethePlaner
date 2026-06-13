@@ -43,27 +43,28 @@ Principles:
 
 ## Layout Structure
 
-Target desktop size: `1440x900` minimum working design, with the concept rendered
-at `1586x992`.
+Target desktop size: `1440x900` compact working design, with the concept rendered
+at `1586x992`. At compact height, the agent area scrolls vertically while keeping
+both agent columns fully visible.
 
 The app shell contains four stable regions:
 
-1. **Sidebar**: fixed 236-260 px.
+1. **Sidebar**: fixed 220-250 px.
    - Product mark and name.
    - `+ New Project` primary action.
    - Projects, Recent, Settings, About navigation.
    - Project list with selected, active, and idle states.
    - Local workspace identity footer.
-2. **Task rail**: 286-320 px inside the central workspace.
+2. **Task rail**: 240-300 px inside the central workspace.
    - Compact project header spans task rail and detail.
    - Task list with title, timestamp, status, progress, summary, and agent count.
    - Archived-task affordance at the bottom.
-3. **Task detail**: minimum 480 px.
+3. **Task detail**: minimum 500 px.
    - Task title and status.
    - Original prompt summary.
    - Overall progress.
    - Two-column agent grid.
-4. **Inspector**: 390-440 px.
+4. **Inspector**: 350-460 px.
    - Logs, Prompt, Subtasks, Changed Files, Diff, Tests, Review tabs.
    - Persistent Accept and Reject action footer.
 
@@ -195,7 +196,8 @@ and updated time. Task creation belongs to the selected project.
 ### Agent Execution
 
 - `AgentCard`
-- Two-column responsive `AgentGrid`
+- Responsive `AgentGrid`: two columns at the concept width and one full-width
+  column when the task detail becomes narrower than 540 px.
 
 Agent cards show:
 

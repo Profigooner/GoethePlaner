@@ -55,8 +55,17 @@ def application_stylesheet(theme: Theme = THEME) -> str:
         color: {theme.text_primary};
         font-size: 13px;
     }}
-    QMainWindow, QWidget#appRoot {{
+    QMainWindow {{
         background-color: {theme.background};
+    }}
+    QWidget#appRoot {{
+        background: qradialgradient(
+            cx: 0.72, cy: 0.10, radius: 1.15,
+            fx: 0.72, fy: 0.10,
+            stop: 0 {theme.background_elevated},
+            stop: 0.48 {theme.background},
+            stop: 1 #060A12
+        );
     }}
     QStatusBar {{
         background-color: {theme.background};
@@ -251,7 +260,7 @@ def application_stylesheet(theme: Theme = THEME) -> str:
         color: {theme.text_secondary};
         border: none;
         border-bottom: 2px solid transparent;
-        padding: 12px 7px 10px 7px;
+        padding: 12px 4px 10px 4px;
         font-size: 11px;
         font-weight: 550;
     }}
