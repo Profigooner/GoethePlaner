@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import QThread
-from PySide6.QtWidgets import QFileDialog, QMainWindow, QMessageBox
+from PySide6.QtWidgets import QDialog, QMainWindow, QMessageBox
 
 from agentboard.app.core.task_manager import WorkflowWorker
 from agentboard.app.core.git_manager import (
@@ -14,16 +14,20 @@ from agentboard.app.core.git_manager import (
     RepositoryState,
 )
 from agentboard.app.core.test_runner import TestRunResult, TestRunner, TestWorker
-from agentboard.app.models import Task, TaskStatus
+from agentboard.app.models import Project, Task, TaskStatus
 from agentboard.app.utils.config import AppConfig
 
+from .dialogs import NewProjectDialog, NewTaskDialog
 from .task_dashboard import TaskDashboard
+from .theme import application_stylesheet
 
 
 class MainWindow(QMainWindow):
     def __init__(self, config: AppConfig, parent=None) -> None:
         super().__init__(parent)
         self.config = config
+        self.projects: list[Project] = []
+        self.current_project: Project | None = None
         self.current_task: Task | None = None
         self.workflow_worker: WorkflowWorker | None = None
         self.workflow_thread: QThread | None = None
@@ -36,11 +40,15 @@ class MainWindow(QMainWindow):
         self.reject_thread: QThread | None = None
         self.dashboard = TaskDashboard()
         self.setCentralWidget(self.dashboard)
-        self.setWindowTitle("AgentBoard")
-        self.resize(1320, 820)
-        self.setMinimumSize(960, 640)
+        self.setWindowTitle("GoethePlaner")
+        self.setStyleSheet(application_stylesheet())
+        self.resize(1500, 920)
+        self.setMinimumSize(1180, 720)
 
-        self.dashboard.browse_button.clicked.connect(self._select_repository)
+        self.dashboard.new_project_requested.connect(self._new_project)
+        self.dashboard.project_selected.connect(self._select_project)
+        self.dashboard.new_task_requested.connect(self._new_task)
+        self.dashboard.task_selected.connect(self._select_task)
         self.dashboard.create_requested.connect(self._validate_task_input)
         self.dashboard.cancel_requested.connect(self._cancel_task)
         self.dashboard.refresh_repository_requested.connect(
@@ -54,18 +62,95 @@ class MainWindow(QMainWindow):
                 " ".join(config.test_command)
             )
 
-        self.statusBar().showMessage(
-            "Select a repository and describe a task."
+        self.dashboard.set_projects([], None)
+        self.dashboard.set_project(None)
+        self.statusBar().showMessage("Create or select a project to begin.")
+
+    def _new_project(self) -> None:
+        if self.workflow_thread is not None:
+            QMessageBox.information(
+                self,
+                "Workflow running",
+                "Wait for the current workflow to finish or cancel it first.",
+            )
+            return
+        dialog = NewProjectDialog(self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        project = Project(dialog.project_name, dialog.repository)
+        self.projects.append(project)
+        self.current_project = project
+        self.current_task = None
+        self._refresh_project_navigation()
+        self.dashboard.set_project(project)
+        self.statusBar().showMessage(f"Project {project.name} created.")
+
+    def _select_project(self, project_id: str) -> None:
+        project = next(
+            (item for item in self.projects if item.id == project_id), None
+        )
+        if project is None:
+            return
+        self.current_project = project
+        self.current_task = project.tasks[-1] if project.tasks else None
+        self._refresh_project_navigation()
+        self.dashboard.set_project(project)
+        if self.current_task is not None:
+            self.dashboard.show_task(self.current_task)
+        else:
+            self.dashboard.detail_stack.setCurrentWidget(
+                self.dashboard.no_task_state
+            )
+        self.statusBar().showMessage(f"Project {project.name} selected.")
+
+    def _new_task(self) -> None:
+        if self.current_project is None:
+            QMessageBox.information(
+                self,
+                "Select a project",
+                "Create or select a project before creating a task.",
+            )
+            return
+        if self.workflow_thread is not None:
+            QMessageBox.information(
+                self,
+                "Workflow running",
+                "Wait for the current workflow to finish or cancel it first.",
+            )
+            return
+        dialog = NewTaskDialog(self.current_project.name, self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        self.start_task(
+            self.current_project.repo_path,
+            dialog.prompt,
+            dialog.mode,
+            title=dialog.task_title,
         )
 
-    def _select_repository(self) -> None:
-        selected = QFileDialog.getExistingDirectory(
-            self,
-            "Select repository",
-            self.dashboard.repository_edit.text() or str(Path.home()),
+    def _select_task(self, task_id: str) -> None:
+        if self.current_project is None:
+            return
+        task = next(
+            (item for item in self.current_project.tasks if item.id == task_id),
+            None,
         )
-        if selected:
-            self.dashboard.set_repository(Path(selected).resolve())
+        if task is None:
+            return
+        if (
+            self.workflow_thread is not None
+            and self.current_task is not None
+            and task.id != self.current_task.id
+        ):
+            self.statusBar().showMessage(
+                "Finish or cancel the active workflow before switching tasks."
+            )
+            return
+        self.current_task = task
+        self.dashboard.show_task(task)
+        self.dashboard.set_running(self.workflow_thread is not None)
+        self.dashboard.set_tasks(self.current_project.tasks, task.id)
+        self.statusBar().showMessage(f"Task {task.title} selected.")
 
     def _validate_task_input(
         self, repository: str, prompt: str, mode: str
@@ -83,16 +168,28 @@ class MainWindow(QMainWindow):
             return
         self.start_task(path.resolve(), prompt, mode)
 
-    def start_task(self, repository: Path, prompt: str, mode: str) -> None:
-        name = next(
+    def start_task(
+        self,
+        repository: Path,
+        prompt: str,
+        mode: str,
+        *,
+        title: str | None = None,
+    ) -> None:
+        name = title or next(
             (line.strip() for line in prompt.splitlines() if line.strip()),
             "Untitled task",
         )
         if len(name) > 64:
             name = f"{name[:61]}..."
         task = Task(repository, prompt, name)
+        project = self._ensure_project(repository)
+        project.add_task(task)
+        self.current_project = project
         self.current_task = task
         self.current_baseline = None
+        self._refresh_project_navigation()
+        self.dashboard.set_project(project)
         self.dashboard.begin_task(task)
         self.statusBar().showMessage("Workflow running...")
 
@@ -100,7 +197,7 @@ class MainWindow(QMainWindow):
         worker = WorkflowWorker(task, self.config, mode)
         worker.moveToThread(thread)
         thread.started.connect(worker.run)
-        worker.task_changed.connect(self.dashboard.set_task_status)
+        worker.task_changed.connect(self._task_state_changed)
         worker.optimized_prompt_ready.connect(
             self.dashboard.set_optimized_prompt
         )
@@ -127,6 +224,10 @@ class MainWindow(QMainWindow):
 
     def _workflow_completed(self, task: Task) -> None:
         self.current_task = task
+        if self.current_project is not None:
+            self.current_project.touch()
+            self._refresh_project_navigation()
+            self.dashboard.set_tasks(self.current_project.tasks, task.id)
         self.dashboard.set_decision_enabled(
             True, self.current_baseline is not None
         )
@@ -137,6 +238,15 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(
             "Workflow complete. Review the generated result."
         )
+
+    def _task_state_changed(self, status: str, progress: int) -> None:
+        self.dashboard.set_task_status(status, progress)
+        if self.current_project is not None and self.current_task is not None:
+            self.current_project.touch()
+            self.dashboard.set_tasks(
+                self.current_project.tasks, self.current_task.id
+            )
+            self._refresh_project_navigation()
 
     def _store_baseline(self, baseline: GitBaseline) -> None:
         self.current_baseline = baseline
@@ -163,6 +273,8 @@ class MainWindow(QMainWindow):
             and self.current_task.status.value == "Cancelled"
         ):
             self.statusBar().showMessage("Workflow cancelled.")
+        if self.current_project is not None:
+            self.dashboard.set_project(self.current_project)
 
     def _refresh_repository(self) -> None:
         if self.current_task is None or self.git_thread is not None:
@@ -248,9 +360,15 @@ class MainWindow(QMainWindow):
         )
         self.dashboard.set_decision_enabled(False, False)
         self.dashboard.logs.append_line(
-            "AgentBoard",
+            "GoethePlaner",
             "Changes accepted locally. No commit or push was performed.",
         )
+        if self.current_project is not None:
+            self.current_project.touch()
+            self._refresh_project_navigation()
+            self.dashboard.set_tasks(
+                self.current_project.tasks, self.current_task.id
+            )
         self.statusBar().showMessage("Changes accepted locally.")
 
     def _confirm_reject(self) -> None:
@@ -263,7 +381,7 @@ class MainWindow(QMainWindow):
         answer = QMessageBox.question(
             self,
             "Reject generated changes?",
-            "AgentBoard will restore the Git working tree to the baseline "
+            "GoethePlaner will restore the Git working tree to the baseline "
             "captured before this task. Pre-existing changes are preserved. "
             "New files created during the task are moved to a temporary archive.",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
@@ -298,6 +416,12 @@ class MainWindow(QMainWindow):
                 self.current_task.status.value,
                 self.current_task.overall_progress,
             )
+            if self.current_project is not None:
+                self.current_project.touch()
+                self._refresh_project_navigation()
+                self.dashboard.set_tasks(
+                    self.current_project.tasks, self.current_task.id
+                )
         self._show_repository_state(outcome.state)
         message = (
             f"Rejected task changes. Restored "
@@ -322,6 +446,25 @@ class MainWindow(QMainWindow):
         self.reject_thread = None
         if thread is not None:
             thread.deleteLater()
+
+    def _ensure_project(self, repository: Path) -> Project:
+        resolved = repository.resolve()
+        project = next(
+            (
+                item
+                for item in self.projects
+                if item.repo_path.resolve() == resolved
+            ),
+            None,
+        )
+        if project is None:
+            project = Project(resolved.name or "Local Project", resolved)
+            self.projects.append(project)
+        return project
+
+    def _refresh_project_navigation(self) -> None:
+        selected = self.current_project.id if self.current_project else None
+        self.dashboard.set_projects(self.projects, selected)
 
     def closeEvent(self, event) -> None:
         if self.workflow_worker is not None:

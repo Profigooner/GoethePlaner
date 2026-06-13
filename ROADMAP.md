@@ -184,22 +184,22 @@ The redesign follows [UI_SPEC.md](UI_SPEC.md) and
 
 ### Phase 9.2: Models and project navigation
 
-- [ ] Add a backward-compatible `Project` model and task ownership fields.
-- [ ] Add in-memory project selection and task collections.
-- [ ] Implement the New Project dialog and sidebar navigation.
+- [x] Add a backward-compatible `Project` model and task ownership fields.
+- [x] Add in-memory project selection and task collections.
+- [x] Implement the New Project dialog and sidebar navigation.
 
 ### Phase 9.3: Workspace architecture
 
-- [ ] Replace the permanent task form with a project header and New Task dialog.
-- [ ] Add a task rail with reusable task cards.
-- [ ] Compose the task detail and persistent inspector regions.
+- [x] Replace the permanent task form with a project header and New Task dialog.
+- [x] Add a task rail with reusable task cards.
+- [x] Compose the task detail and persistent inspector regions.
 
 ### Phase 9.4: Visual system and components
 
-- [ ] Add centralized theme tokens and application QSS.
-- [ ] Add glass panels, status badges, toolbar buttons, and empty states.
-- [ ] Redesign agent cards with activity, log preview, elapsed time, and result.
-- [ ] Polish logs, prompts, subtasks, files, diff, tests, and review views.
+- [x] Add centralized theme tokens and application QSS.
+- [x] Add glass panels, status badges, toolbar buttons, and empty states.
+- [x] Redesign agent cards with activity, log preview, elapsed time, and result.
+- [x] Polish logs, prompts, subtasks, files, diff, tests, and review views.
 
 ### Phase 9.5: Verification and documentation
 

@@ -222,7 +222,9 @@ agents sequentially.
 - `ReviewView`
 
 The inspector uses a top-aligned tab bar, dark content area, and a stable action
-footer. Console surfaces use monospace typography and source-aware colors.
+footer. On constrained Qt widths, `Subtasks` and `Changed Files` may appear as
+`Tasks` and `Files` with full labels in tooltips. Console surfaces use monospace
+typography and source-aware colors.
 
 ## Interaction States
 
@@ -296,4 +298,3 @@ instead of consuming permanent workspace space.
 - Native window controls remain platform-managed.
 - The task/agent layout may become scrollable at smaller heights while retaining
   the same hierarchy.
-
