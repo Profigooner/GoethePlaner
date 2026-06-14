@@ -9,6 +9,21 @@ from uuid import uuid4
 class AgentRole(str, Enum):
     PROMPT_OPTIMIZER = "Prompt Optimizer"
     PLANNER = "Planner"
+    SOFTWARE_ARCHITECT = "Software Architect"
+    FRONTEND_ENGINEER = "Frontend Engineer"
+    BACKEND_ENGINEER = "Backend Engineer"
+    NODEJS_EXPERT = "Node.js Expert"
+    PYTHON_EXPERT = "Python Expert"
+    DATA_ANALYTICS = "Data Analytics"
+    ML_ENGINEER = "ML Engineer"
+    CYBER_SECURITY = "Cyber Security"
+    SYSTEM_ENGINEER = "System Engineer"
+    DATABASE_ENGINEER = "Database Engineer"
+    DEVOPS_ENGINEER = "DevOps Engineer"
+    TEST_ENGINEER = "Test Engineer"
+    BUG_TRACKER = "Bug Tracker"
+    CODE_REVIEWER = "Code Reviewer"
+    DOCUMENTATION_WRITER = "Documentation Writer"
     BACKEND = "Backend"
     FRONTEND = "Frontend"
     TESTER = "Tester"
@@ -32,6 +47,11 @@ class AgentState:
     current_message: str = ""
     id: str = field(default_factory=lambda: uuid4().hex)
     task_id: str | None = None
+    agent_id: str = ""
+    selection_reason: str = ""
+    can_modify_code: bool = False
+    can_run_commands: bool = False
+    risk_level: str = "low"
     logs: list[str] = field(default_factory=list)
     result: str = ""
     started_at: datetime | None = None
@@ -70,3 +90,22 @@ class AgentState:
             return 0
         end = self.finished_at or datetime.now(timezone.utc)
         return max(0, int((end - self.started_at).total_seconds()))
+
+    @property
+    def current_activity(self) -> str:
+        return self.current_message
+
+    @current_activity.setter
+    def current_activity(self, value: str) -> None:
+        self.current_message = value
+
+    @property
+    def result_summary(self) -> str:
+        return self.result
+
+    @result_summary.setter
+    def result_summary(self, value: str) -> None:
+        self.result = value
+
+
+AgentRun = AgentState

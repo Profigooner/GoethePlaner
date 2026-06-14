@@ -62,7 +62,6 @@ class WindowSmokeTests(unittest.TestCase):
         self.assertEqual(window.dashboard.agent_cards, {})
         self.assertFalse(window.dashboard.accept_button.isEnabled())
         self.assertEqual(window.projects, [])
-
         window.close()
 
     def test_creation_dialogs_expose_typed_values(self) -> None:
@@ -82,6 +81,27 @@ class WindowSmokeTests(unittest.TestCase):
 
         project_dialog.close()
         task_dialog.close()
+
+    def test_plan_step_recommends_specialized_agents(self) -> None:
+        dialog = NewTaskDialog("Demo", "demo")
+        dialog.title_edit.setText("Fix login")
+        dialog.prompt_edit.setPlainText(
+            "Fix a login bug in my Node.js backend and add tests."
+        )
+
+        dialog._plan("demo")
+
+        self.assertIn("planner", dialog.selected_agents)
+        self.assertIn("nodejs_expert", dialog.selected_agents)
+        self.assertIn("backend_engineer", dialog.selected_agents)
+        self.assertIn("bug_tracker", dialog.selected_agents)
+        self.assertIn("test_engineer", dialog.selected_agents)
+        self.assertIn("code_reviewer", dialog.selected_agents)
+        self.assertTrue(dialog.optimized_prompt)
+        self.assertTrue(dialog.planner_notes)
+        self.assertGreaterEqual(len(dialog.execution_graph), 4)
+
+        dialog.close()
 
     def test_main_window_mock_run_populates_project_workspace(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -110,6 +130,47 @@ class WindowSmokeTests(unittest.TestCase):
             self.assertEqual(len(window.dashboard.agent_cards), 6)
             self.assertEqual(len(window.dashboard.task_cards), 1)
             self.assertTrue(window.dashboard.accept_button.isEnabled())
+
+            window.close()
+
+    def test_project_generation_actions_update_dashboard_state(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory)
+            (repository / "README.md").write_text("# Demo\nA Python tool.\n")
+            (repository / "pyproject.toml").write_text("[project]\n")
+            window = MainWindow(AppConfig(mock_step_delay=0))
+            project = window._ensure_project(repository)
+            project.goal = "Build a reliable Python tool."
+            window.current_project = project
+            window.dashboard.set_project(project)
+
+            window._start_project_generation("roadmap")
+            self.assertIsNotNone(window.project_generation_thread)
+            roadmap_loop = QEventLoop()
+            window.project_generation_thread.finished.connect(
+                roadmap_loop.quit
+            )
+            QTimer.singleShot(5_000, roadmap_loop.quit)
+            roadmap_loop.exec()
+            self.app.processEvents()
+
+            self.assertIn("Generated Roadmap", project.roadmap)
+            self.assertTrue(project.suggested_next_tasks)
+
+            window._start_project_generation("init")
+            self.assertIsNotNone(window.project_generation_thread)
+            init_loop = QEventLoop()
+            window.project_generation_thread.finished.connect(init_loop.quit)
+            QTimer.singleShot(5_000, init_loop.quit)
+            init_loop.exec()
+            self.app.processEvents()
+
+            self.assertIn("Safe Init Plan", project.init_plan)
+            self.assertIn("README.md", project.init_existing_files)
+            self.assertEqual(
+                window.dashboard.init_plan_view.toPlainText(),
+                project.init_plan,
+            )
 
             window.close()
 

@@ -300,3 +300,36 @@ instead of consuming permanent workspace space.
 - Native window controls remain platform-managed.
 - The task/agent layout may become scrollable at smaller heights while retaining
   the same hierarchy.
+# Advanced Planning Addendum
+
+The Stage 10 orchestration upgrade retains the project-first workspace and adds
+two focused planning surfaces.
+
+## Project planning state
+
+- The project header exposes New Task, Generate Roadmap, Generate Init, Open
+  Roadmap, and Open Settings actions.
+- The center workspace shows Roadmap, Init Plan, and Suggested Tasks tabs when
+  no task is selected.
+- Generated plans use read-only editors. Init candidates use explicit
+  checkboxes and a confirmed Apply Selected Files action.
+- The task rail remains visible so recent and active task context is preserved.
+
+## Task Plan dialog
+
+- Page one captures title, original prompt, and execution mode.
+- Page two repeats the original prompt and shows the optimized prompt, planner
+  notes, recommended/optional/risky groups, permissions, risk, rationale, and
+  execution graph.
+- Planner remains mandatory. Other agents can be manually enabled or disabled.
+- The agent list scrolls independently so the execution graph and primary Run
+  Selected Agents action remain visible.
+
+## Runtime agent cards
+
+- Cards use the registry display name and category rather than a fixed legacy
+  role lookup.
+- Permissions, risk, selection reason, live activity, progress, logs, elapsed
+  time, and result summary are visible.
+- Mock implementation cards can show Running simultaneously. Real OpenCode
+  cards advance sequentially in the shared repository.

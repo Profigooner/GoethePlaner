@@ -165,9 +165,10 @@ Verification: the documented launch path works and the complete test suite passe
 
 ## Current Status
 
-- Active stage: Stage 9, UI/UX redesign
-- Last completed stage: Stage 8, Documentation and release verification
-- Redesign started: June 14, 2026
+- Active stage: Stage 10, advanced orchestration complete
+- Last completed stage: Stage 10, Advanced Agent Planning and Project
+  Orchestration
+- Advanced orchestration completed: June 14, 2026
 
 ## Stage 9: UI/UX Redesign
 
@@ -222,4 +223,66 @@ The redesign follows [UI_SPEC.md](UI_SPEC.md) and
 - The concept-sized `1586x992` render uses two agent columns.
 - The compact `1440x900` render switches to one readable agent column.
 - Final implementation screenshot: `docs/goetheplaner-dashboard.png`.
+- Completed: June 14, 2026.
+
+## Stage 10: Advanced Agent Planning and Project Orchestration
+
+This phase follows [AGENT_SPEC.md](AGENT_SPEC.md) and
+[PROJECT_WORKFLOW.md](PROJECT_WORKFLOW.md).
+
+### Phase 10.1: Architecture contracts
+
+- [x] Inspect the current workflow, UI, models, tests, and project documents.
+- [x] Define the professional agent registry, permissions, risk, prompts,
+  OpenCode mapping, execution rules, and aggregation in `AGENT_SPEC.md`.
+- [x] Define project creation, roadmap, init, planning, execution, and review in
+  `PROJECT_WORKFLOW.md`.
+
+### Phase 10.2: Registry and planner selection
+
+- [x] Add the centralized `AgentDefinition` registry.
+- [x] Add deterministic rule-based agent selection with reasons.
+- [x] Enforce safe built-in OpenCode mappings.
+
+### Phase 10.3: Models and project generators
+
+- [x] Add project goal, roadmap, and init-plan state.
+- [x] Add task planner notes, selected agents, and agent-run state.
+- [x] Add read-only template-based roadmap and init generators.
+
+### Phase 10.4: Planning and project UI
+
+- [x] Add a task Plan step with recommended, optional, and risky agents.
+- [x] Show permissions, risk, selection reason, and execution graph.
+- [x] Add Generate Roadmap and Generate Init project actions and views.
+
+### Phase 10.5: Staged execution
+
+- [x] Run prompt optimization and planning before specialized agents.
+- [x] Run safe mock implementation agents in parallel.
+- [x] Run real OpenCode agents sequentially with safe internal mapping.
+- [x] Run test, review, and documentation stages in dependency order.
+- [x] Aggregate final results and preserve cancellation behavior.
+
+### Phase 10.6: Verification and handoff
+
+- [x] Add registry, selector, model, generator, parallel execution, and mapping
+  tests.
+- [x] Preserve all existing tests and safety behavior.
+- [x] Update README, UI specification, and nightly log.
+- [x] Render and inspect the new planning/project states.
+
+| Milestone | Definition | Status |
+| --- | --- | --- |
+| M7 Advanced orchestration | Planner-selected agents, project plans, and safe staged execution | Complete |
+
+### Advanced Orchestration Verification
+
+- 32 unit, integration, workflow, orchestration, and offscreen Qt tests pass.
+- Mock implementation agents overlap while tests and review respect dependency
+  order.
+- Real OpenCode execution remains sequential in the shared working directory.
+- Internal roles map to `plan` or `build` unless explicitly configured.
+- Roadmap and init generation are read-only; init apply uses exclusive creation.
+- Project planning and task Plan views were rendered and visually inspected.
 - Completed: June 14, 2026.

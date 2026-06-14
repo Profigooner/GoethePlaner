@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QListWidget,
+    QListWidgetItem,
     QPlainTextEdit,
     QPushButton,
     QScrollArea,
@@ -22,6 +23,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from agentboard.app.core.agent_registry import DEFAULT_AGENT_REGISTRY
 from agentboard.app.models import AgentState, Project, Subtask, Task
 
 from .agent_card import AgentCard
@@ -44,6 +46,13 @@ class TaskDashboard(QWidget):
     project_selected = Signal(str)
     new_task_requested = Signal()
     task_selected = Signal(str)
+    generate_roadmap_requested = Signal()
+    generate_init_requested = Signal()
+    open_roadmap_requested = Signal()
+    settings_requested = Signal()
+    export_roadmap_requested = Signal()
+    export_init_requested = Signal()
+    apply_init_requested = Signal(object)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -70,6 +79,24 @@ class TaskDashboard(QWidget):
         self.new_task_button.setObjectName("primaryButton")
         self.new_task_button.setEnabled(False)
         self.new_task_button.clicked.connect(self.new_task_requested)
+        self.generate_roadmap_button = QPushButton("Generate Roadmap")
+        self.generate_roadmap_button.setEnabled(False)
+        self.generate_roadmap_button.clicked.connect(
+            self.generate_roadmap_requested
+        )
+        self.generate_init_button = QPushButton("Generate Init")
+        self.generate_init_button.setEnabled(False)
+        self.generate_init_button.clicked.connect(self.generate_init_requested)
+        self.open_roadmap_button = QPushButton("Open Roadmap")
+        self.open_roadmap_button.setObjectName("ghostButton")
+        self.open_roadmap_button.setEnabled(False)
+        self.open_roadmap_button.clicked.connect(
+            self.open_roadmap_requested
+        )
+        self.settings_button = QPushButton("Open Settings")
+        self.settings_button.setObjectName("ghostButton")
+        self.settings_button.setEnabled(False)
+        self.settings_button.clicked.connect(self.settings_requested)
         header = GlassPanel("headerPanel")
         header_layout = QHBoxLayout(header)
         header_layout.setContentsMargins(18, 12, 14, 12)
@@ -82,6 +109,10 @@ class TaskDashboard(QWidget):
         project_identity.addLayout(title_row)
         project_identity.addWidget(self.project_path_label)
         header_layout.addLayout(project_identity, 1)
+        header_layout.addWidget(self.open_roadmap_button)
+        header_layout.addWidget(self.generate_roadmap_button)
+        header_layout.addWidget(self.generate_init_button)
+        header_layout.addWidget(self.settings_button)
         header_layout.addWidget(self.new_task_button)
 
         self.task_rail = self._build_task_rail()
@@ -176,6 +207,7 @@ class TaskDashboard(QWidget):
     def _build_task_detail(self) -> GlassPanel:
         panel = GlassPanel()
         self.detail_stack = QStackedWidget()
+        self.project_overview = self._build_project_overview()
         self.no_task_state = EmptyState(
             "No task selected",
             "Select a task from the rail or create a new task for this project.",
@@ -249,14 +281,108 @@ class TaskDashboard(QWidget):
         detail_layout.addLayout(agents_header)
         detail_layout.addWidget(agent_scroll, 1)
 
+        self.detail_stack.addWidget(self.project_overview)
         self.detail_stack.addWidget(self.no_task_state)
         self.detail_stack.addWidget(self.detail_content)
-        self.detail_stack.setCurrentWidget(self.no_task_state)
+        self.detail_stack.setCurrentWidget(self.project_overview)
         layout = QVBoxLayout(panel)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.detail_stack)
         panel.setMinimumWidth(500)
         return panel
+
+    def _build_project_overview(self) -> QWidget:
+        page = QWidget()
+        self.overview_title = QLabel("Project workspace")
+        self.overview_title.setObjectName("taskTitle")
+        self.overview_goal = QLabel(
+            "Create a roadmap or init plan, then plan the next task."
+        )
+        self.overview_goal.setObjectName("secondaryText")
+        self.overview_goal.setWordWrap(True)
+        self.overview_stats = QLabel()
+        self.overview_stats.setObjectName("mutedText")
+
+        self.project_plan_tabs = QTabWidget()
+        self.roadmap_view = QPlainTextEdit()
+        self.roadmap_view.setReadOnly(True)
+        self.roadmap_view.setPlaceholderText(
+            "Generate a project roadmap to inspect milestones, risks, and next tasks."
+        )
+        roadmap_page = QWidget()
+        roadmap_actions = QHBoxLayout()
+        self.overview_generate_roadmap = QPushButton("Generate Roadmap")
+        self.overview_generate_roadmap.setObjectName("primaryButton")
+        self.overview_generate_roadmap.clicked.connect(
+            self.generate_roadmap_requested
+        )
+        export_roadmap = QPushButton("Export Roadmap")
+        export_roadmap.clicked.connect(self.export_roadmap_requested)
+        roadmap_actions.addWidget(self.overview_generate_roadmap)
+        roadmap_actions.addWidget(export_roadmap)
+        roadmap_actions.addStretch()
+        roadmap_layout = QVBoxLayout(roadmap_page)
+        roadmap_layout.setContentsMargins(10, 10, 10, 10)
+        roadmap_layout.addLayout(roadmap_actions)
+        roadmap_layout.addWidget(self.roadmap_view)
+
+        self.init_plan_view = QPlainTextEdit()
+        self.init_plan_view.setReadOnly(True)
+        self.init_plan_view.setPlaceholderText(
+            "Generate a safe init plan. No files are created automatically."
+        )
+        self.init_candidates = QListWidget()
+        self.init_candidates.setMaximumHeight(130)
+        init_page = QWidget()
+        init_actions = QHBoxLayout()
+        self.overview_generate_init = QPushButton("Generate Init")
+        self.overview_generate_init.setObjectName("primaryButton")
+        self.overview_generate_init.clicked.connect(
+            self.generate_init_requested
+        )
+        self.apply_init_button = QPushButton("Apply Selected Files")
+        self.apply_init_button.clicked.connect(self._emit_apply_init)
+        export_init = QPushButton("Export Init Plan")
+        export_init.clicked.connect(self.export_init_requested)
+        init_actions.addWidget(self.overview_generate_init)
+        init_actions.addWidget(self.apply_init_button)
+        init_actions.addWidget(export_init)
+        init_actions.addStretch()
+        init_layout = QVBoxLayout(init_page)
+        init_layout.setContentsMargins(10, 10, 10, 10)
+        init_layout.addLayout(init_actions)
+        init_layout.addWidget(self.init_plan_view, 1)
+        init_layout.addWidget(QLabel("Files that could be created"))
+        init_layout.addWidget(self.init_candidates)
+
+        self.suggested_tasks = QListWidget()
+        suggested_page = QWidget()
+        suggested_layout = QVBoxLayout(suggested_page)
+        suggested_layout.setContentsMargins(10, 10, 10, 10)
+        suggested_layout.addWidget(self.suggested_tasks)
+
+        self.project_plan_tabs.addTab(roadmap_page, "Roadmap")
+        self.project_plan_tabs.addTab(init_page, "Init Plan")
+        self.project_plan_tabs.addTab(suggested_page, "Suggested Tasks")
+
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(16, 15, 16, 14)
+        layout.addWidget(self.overview_title)
+        layout.addWidget(self.overview_goal)
+        layout.addWidget(self.overview_stats)
+        layout.addWidget(self.project_plan_tabs, 1)
+        return page
+
+    def _emit_apply_init(self) -> None:
+        selected = [
+            self.init_candidates.item(index).data(
+                Qt.ItemDataRole.UserRole
+            )
+            for index in range(self.init_candidates.count())
+            if self.init_candidates.item(index).checkState()
+            == Qt.CheckState.Checked
+        ]
+        self.apply_init_requested.emit(selected)
 
     def _build_inspector(self) -> GlassPanel:
         panel = GlassPanel("inspectorPanel")
@@ -270,14 +396,12 @@ class TaskDashboard(QWidget):
         self.log_source_combo.addItems(
             [
                 "All Sources",
-                "System",
-                "Workflow",
-                "Prompt Optimizer",
-                "Planner",
-                "Backend",
-                "Frontend",
-                "Tester",
-                "Reviewer",
+                "GoethePlaner",
+                "Git",
+                *[
+                    definition.display_name
+                    for definition in DEFAULT_AGENT_REGISTRY.all()
+                ],
             ]
         )
         self.log_source_combo.currentTextChanged.connect(
@@ -304,6 +428,17 @@ class TaskDashboard(QWidget):
         self.optimized_prompt.setPlaceholderText(
             "The clarified prompt will appear here."
         )
+        self.task_planner_notes = QPlainTextEdit()
+        self.task_planner_notes.setReadOnly(True)
+        self.task_planner_notes.setPlaceholderText(
+            "Planner rationale will appear here."
+        )
+        self.task_planner_notes.setMaximumHeight(140)
+        self.selected_agent_list = QListWidget()
+        self.selected_agent_list.setMaximumHeight(150)
+        self.execution_graph_view = QLabel()
+        self.execution_graph_view.setObjectName("secondaryText")
+        self.execution_graph_view.setWordWrap(True)
         self.subtask_list = QListWidget()
         self.changed_files = QListWidget()
         self.diff_viewer = DiffViewer()
@@ -347,6 +482,18 @@ class TaskDashboard(QWidget):
         optimized_label.setObjectName("sectionLabel")
         prompt_layout.addWidget(optimized_label)
         prompt_layout.addWidget(self.optimized_prompt)
+        planner_label = QLabel("Planner notes")
+        planner_label.setObjectName("sectionLabel")
+        prompt_layout.addWidget(planner_label)
+        prompt_layout.addWidget(self.task_planner_notes)
+        selected_label = QLabel("Selected agents")
+        selected_label.setObjectName("sectionLabel")
+        prompt_layout.addWidget(selected_label)
+        prompt_layout.addWidget(self.selected_agent_list)
+        graph_label = QLabel("Execution graph")
+        graph_label.setObjectName("sectionLabel")
+        prompt_layout.addWidget(graph_label)
+        prompt_layout.addWidget(self.execution_graph_view)
 
         subtask_page = QWidget()
         subtask_layout = QVBoxLayout(subtask_page)
@@ -437,7 +584,15 @@ class TaskDashboard(QWidget):
             )
             self.project_status.set_status("Idle")
             self.new_task_button.setEnabled(False)
+            self.generate_roadmap_button.setEnabled(False)
+            self.generate_init_button.setEnabled(False)
+            self.open_roadmap_button.setEnabled(False)
+            self.settings_button.setEnabled(False)
+            self.overview_generate_roadmap.setEnabled(False)
+            self.overview_generate_init.setEnabled(False)
+            self.apply_init_button.setEnabled(False)
             self.set_tasks([], None)
+            self.detail_stack.setCurrentWidget(self.project_overview)
             return
         self.project_name_label.setText(project.name)
         self.project_path_label.setText(str(project.repo_path))
@@ -445,11 +600,62 @@ class TaskDashboard(QWidget):
             "Active" if project.active_task_count else "Idle"
         )
         self.new_task_button.setEnabled(True)
+        self.generate_roadmap_button.setEnabled(True)
+        self.generate_init_button.setEnabled(True)
+        self.open_roadmap_button.setEnabled(bool(project.roadmap))
+        self.settings_button.setEnabled(True)
+        self.overview_generate_roadmap.setEnabled(True)
+        self.overview_generate_init.setEnabled(True)
+        self.apply_init_button.setEnabled(True)
+        self.overview_title.setText(project.name)
+        self.overview_goal.setText(
+            project.goal or "No project goal recorded."
+        )
+        self.overview_stats.setText(
+            f"{len(project.tasks)} tasks · "
+            f"{project.active_task_count} active · "
+            f"{sum(len(task.agents) for task in project.tasks)} agent runs"
+        )
+        self.roadmap_view.setPlainText(project.roadmap)
+        self.init_plan_view.setPlainText(project.init_plan)
+        self.suggested_tasks.clear()
+        self.suggested_tasks.addItems(project.suggested_next_tasks)
+        self.init_candidates.clear()
+        for path in project.init_candidate_files:
+            item = QListWidgetItem(path)
+            item.setData(Qt.ItemDataRole.UserRole, path)
+            item.setCheckState(Qt.CheckState.Unchecked)
+            self.init_candidates.addItem(item)
         self.set_tasks(
             project.tasks,
             self.current_task.id
             if self.current_task and self.current_task in project.tasks
             else None,
+        )
+        if self.current_task is None or self.current_task not in project.tasks:
+            self.detail_stack.setCurrentWidget(self.project_overview)
+
+    def show_project_overview(self, tab: str = "roadmap") -> None:
+        self.current_task = None
+        self.detail_stack.setCurrentWidget(self.project_overview)
+        index = {"roadmap": 0, "init": 1, "tasks": 2}.get(tab, 0)
+        self.project_plan_tabs.setCurrentIndex(index)
+
+    def set_project_generation_running(self, running: bool) -> None:
+        self.generate_roadmap_button.setEnabled(
+            not running and self.current_project is not None
+        )
+        self.generate_init_button.setEnabled(
+            not running and self.current_project is not None
+        )
+        self.overview_generate_roadmap.setEnabled(
+            not running and self.current_project is not None
+        )
+        self.overview_generate_init.setEnabled(
+            not running and self.current_project is not None
+        )
+        self.apply_init_button.setEnabled(
+            not running and self.current_project is not None
         )
 
     def set_tasks(
@@ -486,6 +692,9 @@ class TaskDashboard(QWidget):
         self.progress_value_label.setText(f"{task.overall_progress}%")
         self.original_prompt.setText(task.original_prompt)
         self.optimized_prompt.clear()
+        self.task_planner_notes.clear()
+        self.selected_agent_list.clear()
+        self.execution_graph_view.clear()
         self.subtask_list.clear()
         self.logs.clear()
         self.changed_files.clear()
@@ -498,6 +707,7 @@ class TaskDashboard(QWidget):
         )
         self.clear_agents()
         self.detail_stack.setCurrentWidget(self.detail_content)
+        self.set_plan(task)
         self.set_running(True)
         if self.current_project is not None:
             self.set_tasks(self.current_project.tasks, task.id)
@@ -506,6 +716,7 @@ class TaskDashboard(QWidget):
         self.begin_task(task)
         self.set_running(False)
         self.set_optimized_prompt(task.optimized_prompt)
+        self.set_plan(task)
         self.set_subtasks(task.subtasks)
         for agent in task.agents:
             self.add_or_update_agent(agent)
@@ -516,6 +727,12 @@ class TaskDashboard(QWidget):
         self.new_task_button.setEnabled(
             not running and self.current_project is not None
         )
+        planning_enabled = not running and self.current_project is not None
+        self.generate_roadmap_button.setEnabled(planning_enabled)
+        self.generate_init_button.setEnabled(planning_enabled)
+        self.overview_generate_roadmap.setEnabled(planning_enabled)
+        self.overview_generate_init.setEnabled(planning_enabled)
+        self.apply_init_button.setEnabled(planning_enabled)
         self.cancel_button.setEnabled(running)
         self.create_button.setEnabled(not running)
         self.browse_button.setEnabled(not running)
@@ -536,6 +753,32 @@ class TaskDashboard(QWidget):
 
     def set_optimized_prompt(self, prompt: str) -> None:
         self.optimized_prompt.setPlainText(prompt)
+
+    def set_plan(self, task: Task) -> None:
+        self.task_planner_notes.setPlainText(task.planner_notes)
+        self.selected_agent_list.clear()
+        for agent_id in task.selected_agents:
+            if DEFAULT_AGENT_REGISTRY.contains(agent_id):
+                definition = DEFAULT_AGENT_REGISTRY.get(agent_id)
+                reason = task.agent_selection_reasons.get(
+                    agent_id, definition.description
+                )
+                self.selected_agent_list.addItem(
+                    f"{definition.display_name} · {definition.risk_level.title()} risk\n"
+                    f"{reason}"
+                )
+            else:
+                self.selected_agent_list.addItem(agent_id)
+        stages: list[str] = []
+        for stage in task.execution_graph:
+            names = [
+                DEFAULT_AGENT_REGISTRY.get(agent_id).display_name
+                if DEFAULT_AGENT_REGISTRY.contains(agent_id)
+                else agent_id
+                for agent_id in stage
+            ]
+            stages.append(" + ".join(names))
+        self.execution_graph_view.setText("  →  ".join(stages))
 
     def set_subtasks(self, subtasks: list[Subtask]) -> None:
         self.subtask_list.clear()

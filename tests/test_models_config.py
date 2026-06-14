@@ -56,6 +56,9 @@ class ConfigTests(unittest.TestCase):
             ),
             "AGENTBOARD_MOCK_DELAY": "0.01",
             "AGENTBOARD_TEST_COMMAND": "python -m unittest",
+            "AGENTBOARD_OPENCODE_AGENT_MAP": (
+                '{"ml_engineer": "configured-ml"}'
+            ),
         }
         with patch.dict(os.environ, values, clear=False):
             config = AppConfig.from_env()
@@ -65,6 +68,10 @@ class ConfigTests(unittest.TestCase):
             config.test_command, ("python", "-m", "unittest")
         )
         self.assertIn("custom-code", config.opencode_command_template)
+        self.assertEqual(
+            config.custom_agent_map,
+            {"ml_engineer": "configured-ml"},
+        )
 
 
 if __name__ == "__main__":

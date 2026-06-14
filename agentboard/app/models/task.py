@@ -38,6 +38,10 @@ class Task:
     id: str = field(default_factory=lambda: uuid4().hex)
     project_id: str | None = None
     optimized_prompt: str = ""
+    planner_notes: str = ""
+    selected_agents: list[str] = field(default_factory=list)
+    agent_selection_reasons: dict[str, str] = field(default_factory=dict)
+    execution_graph: list[list[str]] = field(default_factory=list)
     subtasks: list[Subtask] = field(default_factory=list)
     agents: list[AgentState] = field(default_factory=list)
     status: TaskStatus = TaskStatus.DRAFT
@@ -63,6 +67,14 @@ class Task:
         self.overall_progress = max(0, min(100, value))
         self.touch()
 
+    @property
+    def progress(self) -> int:
+        return self.overall_progress
+
+    @progress.setter
+    def progress(self, value: int) -> None:
+        self.set_progress(value)
+
     def finish(self, status: TaskStatus) -> None:
         self.status = status
         self.completed_at = datetime.now(timezone.utc)
@@ -72,3 +84,12 @@ class Task:
 
     def touch(self) -> None:
         self.updated_at = datetime.now(timezone.utc)
+
+    @property
+    def agent_runs(self) -> list[AgentState]:
+        return self.agents
+
+    @agent_runs.setter
+    def agent_runs(self, value: list[AgentState]) -> None:
+        self.agents = value
+        self.touch()

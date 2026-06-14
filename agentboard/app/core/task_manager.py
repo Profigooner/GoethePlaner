@@ -6,21 +6,34 @@ from threading import Event
 from PySide6.QtCore import QObject, Signal, Slot
 
 from agentboard.app.models import (
-    AgentRole,
     AgentState,
     AgentStatus,
     EventKind,
+    Subtask,
     Task,
     TaskStatus,
     WorkflowEvent,
 )
 from agentboard.app.utils.config import AppConfig
 
-from .agent_dispatcher import AgentDispatcher
+from .agent_dispatcher import StagedAgentDispatcher
+from .agent_registry import (
+    AgentDefinition,
+    DEFAULT_AGENT_REGISTRY,
+)
 from .git_manager import GitBaseline, GitManager
-from .opencode_runner import select_runner
+from .opencode_runner import MockOpenCodeRunner, select_runner
 from .prompt_optimizer import PromptOptimizer
-from .task_planner import TaskPlanner
+
+
+DEFAULT_SELECTED_AGENTS = (
+    "prompt_optimizer",
+    "planner",
+    "backend_engineer",
+    "frontend_engineer",
+    "test_engineer",
+    "code_reviewer",
+)
 
 
 class WorkflowWorker(QObject):
@@ -42,7 +55,6 @@ class WorkflowWorker(QObject):
         self.mode = mode
         self.cancel_event = Event()
         self.optimizer = PromptOptimizer()
-        self.planner = TaskPlanner()
         self.baseline: GitBaseline | None = None
 
     @Slot()
@@ -51,9 +63,11 @@ class WorkflowWorker(QObject):
             self._run_pipeline()
         except Exception as exc:
             self.task.finish(TaskStatus.FAILED)
-            self.task_changed.emit(self.task.status.value, self.task.overall_progress)
+            self.task_changed.emit(
+                self.task.status.value, self.task.overall_progress
+            )
             self._emit_event(
-                EventKind.ERROR, f"Workflow failed: {exc}", "AgentBoard"
+                EventKind.ERROR, f"Workflow failed: {exc}", "GoethePlaner"
             )
             self.failed.emit(str(exc))
         finally:
@@ -63,50 +77,57 @@ class WorkflowWorker(QObject):
         self.cancel_event.set()
 
     def _run_pipeline(self) -> None:
-        self.task.agents = self._create_agents()
+        definitions = self._selected_definitions()
+        self.task.selected_agents = [item.id for item in definitions]
+        self.task.execution_graph = self._execution_graph(definitions)
+        self.task.agents = self._create_agents(definitions)
         for agent in self.task.agents:
-            agent.task_id = self.task.id
             self.agent_changed.emit(replace(agent))
 
-        optimizer_agent = self.task.agents[0]
-        self._set_task(TaskStatus.OPTIMIZING, 3)
-        if not self._run_local_stage(
-            optimizer_agent,
-            [
-                "Reading the rough task prompt",
-                "Adding implementation constraints",
-                "Defining completion criteria",
-            ],
-            3,
-            12,
-        ):
-            return
+        agents_by_id = {
+            agent.agent_id: agent for agent in self.task.agents
+        }
+        optimizer = agents_by_id.get("prompt_optimizer")
+        if optimizer is not None:
+            self._set_task(TaskStatus.OPTIMIZING, 3)
+            if not self._run_local_stage(
+                optimizer,
+                [
+                    "Reading the rough task prompt",
+                    "Adding implementation constraints",
+                    "Defining completion criteria",
+                ],
+                3,
+                12,
+            ):
+                return
 
-        self.task.optimized_prompt = self.optimizer.optimize(
-            self.task.original_prompt, self.task.repository.name
-        )
+        if not self.task.optimized_prompt:
+            self.task.optimized_prompt = self.optimizer.optimize(
+                self.task.original_prompt, self.task.repository.name
+            )
         self.optimized_prompt_ready.emit(self.task.optimized_prompt)
 
-        planner_agent = self.task.agents[1]
+        planner = agents_by_id["planner"]
         self._set_task(TaskStatus.PLANNING, 13)
         if not self._run_local_stage(
-            planner_agent,
+            planner,
             [
-                "Identifying implementation areas",
-                "Assigning specialized agents",
-                "Ordering verification and review",
+                "Confirming selected specialists",
+                "Ordering implementation and verification",
+                "Recording execution constraints",
             ],
             13,
             20,
         ):
             return
 
-        self.task.subtasks = self.planner.plan(self.task.optimized_prompt)
+        self.task.subtasks = self._build_subtasks(definitions)
         self.subtasks_ready.emit(list(self.task.subtasks))
         self._emit_event(
             EventKind.RESULT,
-            f"Created {len(self.task.subtasks)} executable subtasks.",
-            planner_agent.name,
+            f"Created {len(self.task.subtasks)} staged agent assignments.",
+            planner.name,
         )
 
         self._set_task(TaskStatus.RUNNING, 20)
@@ -125,18 +146,30 @@ class WorkflowWorker(QObject):
                 "Selected folder is not a Git repository; diff and reject are unavailable.",
                 "Git",
             )
+
         runner, runner_label = select_runner(self.config, self.mode)
+        parallel = isinstance(runner, MockOpenCodeRunner)
+        mode_note = (
+            "parallel implementation stages"
+            if parallel
+            else "safe sequential stages"
+        )
         self._emit_event(
             EventKind.STATUS,
-            f"Execution runner: {runner_label}",
-            "AgentBoard",
+            f"Execution runner: {runner_label}; {mode_note}.",
+            "GoethePlaner",
         )
-        dispatcher = AgentDispatcher(runner)
+        dispatcher = StagedAgentDispatcher(
+            runner,
+            custom_agents=self.config.custom_agent_map,
+            parallel_implementation=parallel,
+        )
         success = dispatcher.dispatch(
             repository=self.task.repository,
             optimized_prompt=self.task.optimized_prompt,
-            subtasks=self.task.subtasks,
-            agents=self.task.agents[2:],
+            planner_notes=self.task.planner_notes,
+            definitions=definitions,
+            agents=self.task.agents,
             cancel_event=self.cancel_event,
             on_agent=self.agent_changed.emit,
             on_log=lambda source, message: self._emit_event(
@@ -144,7 +177,6 @@ class WorkflowWorker(QObject):
             ),
             on_completion=self._agent_completed,
         )
-
         if not success:
             if self.cancel_event.is_set():
                 self._finish_cancelled()
@@ -159,18 +191,112 @@ class WorkflowWorker(QObject):
         self._set_task(TaskStatus.REVIEWING, 96)
         self._emit_event(
             EventKind.STATUS,
-            "Collecting final workflow results.",
-            "AgentBoard",
+            "Collecting final agent results and repository state.",
+            "GoethePlaner",
         )
         self.task.finish(TaskStatus.COMPLETED)
         self.task_changed.emit(self.task.status.value, 100)
         self._emit_event(
             EventKind.RESULT,
             "Workflow completed. Review repository changes before accepting.",
-            "AgentBoard",
+            "GoethePlaner",
         )
         self.repository_state_ready.emit(git_manager.inspect())
         self.completed.emit(self.task)
+
+    def _selected_definitions(self) -> list[AgentDefinition]:
+        selected = list(self.task.selected_agents or DEFAULT_SELECTED_AGENTS)
+        if "planner" not in selected:
+            selected.insert(0, "planner")
+        known = {
+            agent_id
+            for agent_id in selected
+            if DEFAULT_AGENT_REGISTRY.contains(agent_id)
+        }
+        graph_order = [
+            agent_id
+            for stage in self.task.execution_graph
+            for agent_id in stage
+            if agent_id in known
+        ]
+        preferred = [
+            "prompt_optimizer",
+            "planner",
+            *graph_order,
+            *selected,
+        ]
+        ordered: list[AgentDefinition] = []
+        seen: set[str] = set()
+        for agent_id in preferred:
+            if agent_id in seen or agent_id not in known:
+                continue
+            ordered.append(DEFAULT_AGENT_REGISTRY.get(agent_id))
+            seen.add(agent_id)
+        return ordered
+
+    def _create_agents(
+        self, definitions: list[AgentDefinition]
+    ) -> list[AgentState]:
+        agents: list[AgentState] = []
+        for definition in definitions:
+            agents.append(
+                AgentState(
+                    definition.role,
+                    definition.display_name,
+                    task_id=self.task.id,
+                    agent_id=definition.id,
+                    selection_reason=self.task.agent_selection_reasons.get(
+                        definition.id, definition.description
+                    ),
+                    can_modify_code=definition.can_modify_code,
+                    can_run_commands=definition.can_run_commands,
+                    risk_level=definition.risk_level,
+                )
+            )
+        return agents
+
+    @staticmethod
+    def _execution_graph(
+        definitions: list[AgentDefinition],
+    ) -> list[list[str]]:
+        selected = {item.id for item in definitions}
+        implementation = [
+            item.id
+            for item in definitions
+            if item.id
+            not in {
+                "prompt_optimizer",
+                "planner",
+                "test_engineer",
+                "code_reviewer",
+                "documentation_writer",
+            }
+        ]
+        stages = [
+            ["prompt_optimizer"] if "prompt_optimizer" in selected else [],
+            ["planner"],
+            implementation,
+            ["test_engineer"] if "test_engineer" in selected else [],
+            ["code_reviewer"] if "code_reviewer" in selected else [],
+            ["documentation_writer"]
+            if "documentation_writer" in selected
+            else [],
+        ]
+        return [stage for stage in stages if stage]
+
+    @staticmethod
+    def _build_subtasks(
+        definitions: list[AgentDefinition],
+    ) -> list[Subtask]:
+        return [
+            Subtask(
+                title=f"Run {definition.display_name} stage",
+                description=definition.description,
+                agent_role=definition.role,
+            )
+            for definition in definitions
+            if definition.id not in {"prompt_optimizer", "planner"}
+        ]
 
     def _run_local_stage(
         self,
@@ -201,13 +327,13 @@ class WorkflowWorker(QObject):
                 (end_progress - start_progress) * index / len(messages)
             )
             agent.update(progress=stage_progress, message=message)
+            agent.append_log(message)
             self.agent_changed.emit(replace(agent))
             self.task.set_progress(task_progress)
             self.task_changed.emit(self.task.status.value, task_progress)
             self._emit_event(EventKind.LOG, message, agent.name)
-            agent.append_log(message)
-            self.agent_changed.emit(replace(agent))
 
+        agent.result = "Local planning stage completed."
         agent.update(
             status=AgentStatus.DONE,
             progress=100,
@@ -234,14 +360,14 @@ class WorkflowWorker(QObject):
             self.task.status.value, self.task.overall_progress
         )
         self._emit_event(
-            EventKind.STATUS, "Workflow cancelled.", "AgentBoard"
+            EventKind.STATUS, "Workflow cancelled.", "GoethePlaner"
         )
 
     def _set_task(self, status: TaskStatus, progress: int) -> None:
         self.task.status = status
         self.task.set_progress(progress)
         self.task_changed.emit(status.value, self.task.overall_progress)
-        self._emit_event(EventKind.STATUS, status.value, "AgentBoard")
+        self._emit_event(EventKind.STATUS, status.value, "GoethePlaner")
 
     def _emit_event(
         self, kind: EventKind, message: str, source: str
@@ -249,14 +375,3 @@ class WorkflowWorker(QObject):
         self.event_emitted.emit(
             WorkflowEvent(kind=kind, message=message, source=source)
         )
-
-    @staticmethod
-    def _create_agents() -> list[AgentState]:
-        return [
-            AgentState(AgentRole.PROMPT_OPTIMIZER, "Prompt Optimizer Agent"),
-            AgentState(AgentRole.PLANNER, "Planner Agent"),
-            AgentState(AgentRole.BACKEND, "Backend Agent"),
-            AgentState(AgentRole.FRONTEND, "Frontend Agent"),
-            AgentState(AgentRole.TESTER, "Tester Agent"),
-            AgentState(AgentRole.REVIEWER, "Reviewer Agent"),
-        ]

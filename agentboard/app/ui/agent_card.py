@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
+from agentboard.app.core.agent_registry import DEFAULT_AGENT_REGISTRY
 from agentboard.app.models import AgentRole, AgentState, AgentStatus
 
 from .components import ProgressPill, StatusBadge
@@ -25,6 +26,21 @@ _ROLE_META = {
     AgentRole.REVIEWER: ("◇", "Code reviewer", THEME.violet),
 }
 
+_CATEGORY_META = {
+    "Planning": ("P", THEME.violet),
+    "Architecture": ("A", THEME.violet),
+    "Engineering": ("E", THEME.accent),
+    "Language": ("L", THEME.accent),
+    "Data": ("D", THEME.accent),
+    "AI / ML": ("ML", THEME.violet),
+    "Security": ("S", THEME.error),
+    "Systems": ("SYS", THEME.warning),
+    "Operations": ("OPS", THEME.warning),
+    "Quality": ("Q", THEME.warning),
+    "Review": ("R", THEME.violet),
+    "Documentation": ("DOC", THEME.success),
+}
+
 
 class AgentCard(QFrame):
     def __init__(self, agent: AgentState, parent=None) -> None:
@@ -32,7 +48,7 @@ class AgentCard(QFrame):
         self.agent_id = agent.id
         self.agent = replace(agent)
         self.setObjectName("agentCard")
-        self.setMinimumHeight(178)
+        self.setMinimumHeight(205)
 
         self.icon_label = QLabel()
         self.icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -49,6 +65,10 @@ class AgentCard(QFrame):
         self.message_label.setObjectName("secondaryText")
         self.message_label.setWordWrap(True)
         self.message_label.setMaximumHeight(36)
+        self.reason_label = QLabel()
+        self.reason_label.setObjectName("mutedText")
+        self.reason_label.setWordWrap(True)
+        self.reason_label.setMaximumHeight(34)
         self.log_preview = QLabel()
         self.log_preview.setTextInteractionFlags(
             Qt.TextInteractionFlag.TextSelectableByMouse
@@ -91,6 +111,7 @@ class AgentCard(QFrame):
         layout.addWidget(self.progress)
         layout.addWidget(self.activity_caption)
         layout.addWidget(self.message_label)
+        layout.addWidget(self.reason_label)
         layout.addWidget(self.log_preview)
         layout.addLayout(footer)
 
@@ -102,7 +123,24 @@ class AgentCard(QFrame):
 
     def update_agent(self, agent: AgentState) -> None:
         self.agent = replace(agent)
-        icon, role_name, color = _ROLE_META[agent.role]
+        if agent.agent_id and DEFAULT_AGENT_REGISTRY.contains(agent.agent_id):
+            definition = DEFAULT_AGENT_REGISTRY.get(agent.agent_id)
+            icon, color = _CATEGORY_META.get(
+                definition.category, ("A", THEME.accent)
+            )
+            permissions = (
+                f"{definition.category} · "
+                f"Code {'yes' if agent.can_modify_code else 'no'} · "
+                f"Commands {'yes' if agent.can_run_commands else 'no'} · "
+                f"{agent.risk_level.title()} risk"
+            )
+            display_name = definition.display_name
+        else:
+            icon, role_name, color = _ROLE_META.get(
+                agent.role, ("A", agent.role.value, THEME.accent)
+            )
+            permissions = role_name
+            display_name = agent.name
         self.icon_label.setText(icon)
         self.icon_label.setStyleSheet(
             f"background-color: {rgba(color, 42)};"
@@ -110,12 +148,22 @@ class AgentCard(QFrame):
             f"color: {color}; border-radius: 8px;"
             "font-size: 15px; font-weight: 700;"
         )
-        self.name_label.setText(agent.role.value)
-        self.role_label.setText(role_name)
+        self.name_label.setText(display_name)
+        self.role_label.setText(permissions)
         self.status_badge.set_status(agent.status)
         self.progress.setValue(agent.progress)
         self.progress.set_color(self._progress_color(agent.status, color))
-        self.message_label.setText(agent.current_message or "Waiting to start")
+        self.message_label.setText(
+            agent.current_message
+            or agent.selection_reason
+            or "Waiting to start"
+        )
+        self.reason_label.setText(
+            f"Selected: {agent.selection_reason}"
+            if agent.selection_reason
+            else ""
+        )
+        self.reason_label.setVisible(bool(agent.selection_reason))
         preview = agent.logs[-2:]
         self.log_preview.setText(
             "\n".join(f"—  {line}" for line in preview)
@@ -166,4 +214,3 @@ class AgentCard(QFrame):
         if status == AgentStatus.CANCELLED:
             return THEME.warning
         return role_color
-

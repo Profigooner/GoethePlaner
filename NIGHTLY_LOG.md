@@ -84,3 +84,44 @@ added.
   runs executable subtasks sequentially.
 - No real OpenCode task was started during visual QA; command construction,
   availability, fallback, and the existing runner tests remain covered.
+
+## June 14, 2026 - Advanced Agent Planning and Orchestration
+
+### Completed
+
+- Added `AGENT_SPEC.md` and `PROJECT_WORKFLOW.md`.
+- Added a centralized registry with 17 professional agent definitions,
+  permissions, risk levels, prompts, keywords, and safe OpenCode mappings.
+- Added deterministic planner selection for language, UI, backend, data, ML,
+  security, database, operations, testing, debugging, review, and docs work.
+- Added a two-step task Plan dialog with original and optimized prompts,
+  planner notes, recommendation reasons, manual selection, and graph preview.
+- Extended project, task, and agent-run state for goals, plans, selections,
+  execution metadata, permissions, risk, results, and timing.
+- Added read-only roadmap and init generators plus confirmed, exclusive creation
+  for selected missing init files.
+- Added project Roadmap, Init Plan, and Suggested Tasks views and actions.
+- Replaced the fixed six-agent worker with selected staged orchestration.
+- Added parallel mock implementation execution and sequential shared-directory
+  OpenCode execution.
+- Ordered Test Engineer, Code Reviewer, and Documentation Writer after
+  implementation.
+- Added safe `plan`/`build` mapping with optional explicit JSON configuration.
+
+### Verification
+
+- `QT_QPA_PLATFORM=offscreen .venv/bin/python -m unittest discover -v`
+- `.venv/bin/python -m compileall -q agentboard tests`
+- `git diff --check`
+- 32 tests passed.
+- Rendered and inspected the populated project planning dashboard.
+- Rendered and inspected the styled task Plan dialog.
+
+### Safety
+
+- No automatic roadmap or init writes.
+- Existing init files are skipped even when selected.
+- Exports require explicit replacement confirmation.
+- Real OpenCode code-modifying stages remain sequential.
+- No shell execution, commit, push, force push, or destructive command was
+  introduced.
