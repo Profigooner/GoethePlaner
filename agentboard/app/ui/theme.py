@@ -81,7 +81,8 @@ def application_stylesheet(theme: Theme = THEME) -> str:
         border-radius: 6px;
         padding: 6px 8px;
     }}
-    QFrame#glassPanel, QFrame#sidebarPanel, QFrame#inspectorPanel {{
+    QFrame#glassPanel, QFrame#sidebarPanel, QFrame#inspectorPanel,
+    QFrame#bottomToolWindow {{
         background-color: {theme.panel};
         border: 1px solid {theme.border};
         border-radius: 13px;
@@ -175,6 +176,34 @@ def application_stylesheet(theme: Theme = THEME) -> str:
     QPushButton#ghostButton:hover {{
         background-color: {theme.panel_hover};
         color: {theme.text_primary};
+    }}
+    QPushButton#toolWindowButton {{
+        background: transparent;
+        border-color: transparent;
+        border-radius: 5px;
+        color: {theme.text_secondary};
+        padding: 5px 10px;
+        min-height: 16px;
+    }}
+    QPushButton#toolWindowButton:hover {{
+        background-color: {theme.panel_hover};
+        color: {theme.text_primary};
+    }}
+    QPushButton#toolWindowButton:checked {{
+        background-color: {theme.panel_alt};
+        border-color: {theme.border_strong};
+        color: {theme.accent_hover};
+    }}
+    QFrame#bottomToolBar {{
+        background-color: {theme.background_elevated};
+        border: 1px solid {theme.border};
+        border-radius: 7px;
+    }}
+    QFrame#suggestionPanel {{
+        background-color: {theme.background_elevated};
+        border: 1px solid {theme.border};
+        border-radius: 9px;
+        padding: 7px;
     }}
     QLineEdit, QTextEdit, QPlainTextEdit, QComboBox {{
         background-color: {theme.background_elevated};
@@ -290,6 +319,33 @@ def application_stylesheet(theme: Theme = THEME) -> str:
     QListWidget::item:selected {{
         background-color: {theme.panel_hover};
         color: {theme.text_primary};
+    }}
+    QTreeWidget {{
+        background: transparent;
+        border: none;
+        outline: 0;
+        color: {theme.text_secondary};
+    }}
+    QTreeWidget::item {{
+        min-height: 25px;
+        padding: 3px 5px;
+        border-radius: 6px;
+    }}
+    QTreeWidget::item:hover {{
+        background-color: {theme.panel_hover};
+        color: {theme.text_primary};
+    }}
+    QTreeWidget::item:selected {{
+        background-color: {rgba(theme.accent, 28)};
+        color: {theme.text_primary};
+        border: 1px solid {theme.border_strong};
+    }}
+    QHeaderView::section {{
+        background-color: {theme.panel_alt};
+        color: {theme.text_secondary};
+        border: none;
+        border-bottom: 1px solid {theme.border};
+        padding: 6px;
     }}
     QDialog {{
         background-color: {theme.background};

@@ -12,9 +12,10 @@ from PySide6.QtCore import QEventLoop, QTimer
 from PySide6.QtWidgets import QApplication
 
 from agentboard.app.core.task_manager import WorkflowWorker
-from agentboard.app.models import Task, TaskStatus
+from agentboard.app.models import DraftStatus, Project, Task, TaskStatus
 from agentboard.app.ui.dialogs import NewProjectDialog, NewTaskDialog
 from agentboard.app.ui.main_window import MainWindow
+from agentboard.app.ui.project_dialogs import InitDialog, RoadmapDialog
 from agentboard.app.utils.config import AppConfig
 
 
@@ -62,6 +63,17 @@ class WindowSmokeTests(unittest.TestCase):
         self.assertEqual(window.dashboard.agent_cards, {})
         self.assertFalse(window.dashboard.accept_button.isEnabled())
         self.assertEqual(window.projects, [])
+        self.assertEqual(
+            window.dashboard.generate_roadmap_button.text(),
+            "Create Roadmap",
+        )
+        self.assertEqual(
+            window.dashboard.generate_init_button.text(),
+            "Run Init Agent",
+        )
+        logo = window.dashboard.sidebar.logo_label.pixmap()
+        self.assertIsNotNone(logo)
+        self.assertFalse(logo.isNull())
         window.close()
 
     def test_creation_dialogs_expose_typed_values(self) -> None:
@@ -130,49 +142,71 @@ class WindowSmokeTests(unittest.TestCase):
             self.assertEqual(len(window.dashboard.agent_cards), 6)
             self.assertEqual(len(window.dashboard.task_cards), 1)
             self.assertTrue(window.dashboard.accept_button.isEnabled())
+            self.assertEqual(
+                {
+                    suggestion.target
+                    for suggestion in window.projects[0].pending_suggestions
+                },
+                {"roadmap", "init"},
+            )
+            self.assertTrue(window.current_task.completion_summary)
 
             window.close()
 
-    def test_project_generation_actions_update_dashboard_state(self) -> None:
+    def test_project_agent_dialogs_create_reviewable_drafts(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             repository = Path(directory)
             (repository / "README.md").write_text("# Demo\nA Python tool.\n")
             (repository / "pyproject.toml").write_text("[project]\n")
-            window = MainWindow(AppConfig(mock_step_delay=0))
-            project = window._ensure_project(repository)
-            project.goal = "Build a reliable Python tool."
-            window.current_project = project
-            window.dashboard.set_project(project)
-
-            window._start_project_generation("roadmap")
-            self.assertIsNotNone(window.project_generation_thread)
-            roadmap_loop = QEventLoop()
-            window.project_generation_thread.finished.connect(
-                roadmap_loop.quit
+            project = Project(
+                "Demo", repository, goal="Build a reliable Python tool."
             )
+            roadmap = RoadmapDialog(
+                project, AppConfig(mock_step_delay=0)
+            )
+            roadmap.mode_combo.setCurrentIndex(1)
+            roadmap._generate()
+            self.assertIsNotNone(roadmap.worker_thread)
+            roadmap_loop = QEventLoop()
+            roadmap.worker_thread.finished.connect(roadmap_loop.quit)
             QTimer.singleShot(5_000, roadmap_loop.quit)
             roadmap_loop.exec()
             self.app.processEvents()
 
-            self.assertIn("Generated Roadmap", project.roadmap)
-            self.assertTrue(project.suggested_next_tasks)
+            self.assertIsNotNone(project.roadmap_draft)
+            self.assertEqual(project.roadmap, "")
+            self.assertEqual(
+                project.roadmap_draft.status, DraftStatus.DRAFT
+            )
+            roadmap._accept_draft()
+            self.assertIn("Roadmap Draft", project.roadmap)
+            self.assertTrue(roadmap.ask_button.isEnabled())
+            self.assertEqual(roadmap.ask_button.text(), "Create Revision")
 
-            window._start_project_generation("init")
-            self.assertIsNotNone(window.project_generation_thread)
+            before = sorted(path.name for path in repository.iterdir())
+            init = InitDialog(project, AppConfig(mock_step_delay=0))
+            init.mode_combo.setCurrentIndex(1)
+            init._generate()
+            self.assertIsNotNone(init.worker_thread)
             init_loop = QEventLoop()
-            window.project_generation_thread.finished.connect(init_loop.quit)
+            init.worker_thread.finished.connect(init_loop.quit)
             QTimer.singleShot(5_000, init_loop.quit)
             init_loop.exec()
             self.app.processEvents()
 
-            self.assertIn("Safe Init Plan", project.init_plan)
-            self.assertIn("README.md", project.init_existing_files)
-            self.assertEqual(
-                window.dashboard.init_plan_view.toPlainText(),
-                project.init_plan,
+            after = sorted(path.name for path in repository.iterdir())
+            self.assertEqual(before, after)
+            self.assertIsNotNone(project.init_draft)
+            self.assertIn(
+                "AGENTS.md",
+                {
+                    proposal.path
+                    for proposal in project.init_draft.proposed_files
+                },
             )
 
-            window.close()
+            roadmap.close()
+            init.close()
 
 
 if __name__ == "__main__":

@@ -46,6 +46,7 @@ class Task:
     agents: list[AgentState] = field(default_factory=list)
     status: TaskStatus = TaskStatus.DRAFT
     overall_progress: int = 0
+    completion_summary: str = ""
     created_at: datetime = field(
         default_factory=lambda: datetime.now(timezone.utc)
     )

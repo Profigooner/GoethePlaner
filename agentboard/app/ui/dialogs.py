@@ -4,6 +4,7 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QDialog,
     QDialogButtonBox,
@@ -25,7 +26,9 @@ from agentboard.app.core.agent_selector import (
     AgentSelectionResult,
     AgentSelector,
 )
+from agentboard.app.core.project_analysis import ProjectAnalyzer
 from agentboard.app.core.prompt_optimizer import PromptOptimizer
+from agentboard.app.models import ProjectAnalysis
 
 from .plan_view import AgentSelectionPanel
 
@@ -35,49 +38,98 @@ class NewProjectDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("New Project")
         self.setModal(True)
-        self.resize(560, 300)
+        self.resize(720, 620)
+        self._analysis: ProjectAnalysis | None = None
+        self._analysis_repository: Path | None = None
 
-        title = QLabel("Connect a local project")
+        title = QLabel("Create or import a project")
         title.setObjectName("taskTitle")
         description = QLabel(
-            "Projects group a repository, roadmap, init plan, tasks, agents, "
-            "and review output."
+            "Existing repositories are analyzed without changes. New projects "
+            "use guided Roadmap and Init review before coding begins."
         )
         description.setObjectName("secondaryText")
         description.setWordWrap(True)
 
+        self.project_type_combo = QComboBox()
+        self.project_type_combo.addItem("Existing Project", "existing")
+        self.project_type_combo.addItem("New Project", "new")
+        self.project_type_combo.currentIndexChanged.connect(
+            self._project_type_changed
+        )
         self.name_edit = QLineEdit()
         self.name_edit.setPlaceholderText("Project name")
         self.repository_edit = QLineEdit()
-        self.repository_edit.setPlaceholderText("Local repository folder")
+        self.repository_edit.setPlaceholderText("Existing repository folder")
+        self.repository_edit.textChanged.connect(self._repository_changed)
         self.goal_edit = QTextEdit()
         self.goal_edit.setPlaceholderText(
-            "Optional project goal, for example: Build a reliable local "
-            "analytics dashboard."
+            "Project goal. Required for new projects and recommended for "
+            "existing projects."
         )
-        self.goal_edit.setMaximumHeight(80)
+        self.goal_edit.setMaximumHeight(86)
         browse = QPushButton("Browse…")
         browse.clicked.connect(self._browse)
+        self.analyze_button = QPushButton("Analyze Project")
+        self.analyze_button.clicked.connect(self._analyze_existing)
         repository_row = QHBoxLayout()
         repository_row.addWidget(self.repository_edit, 1)
         repository_row.addWidget(browse)
+        repository_row.addWidget(self.analyze_button)
 
         form = QFormLayout()
         form.setSpacing(12)
+        form.addRow("Project type", self.project_type_combo)
         form.addRow("Name", self.name_edit)
-        form.addRow("Repository", repository_row)
+        self.repository_label = QLabel("Repository")
+        form.addRow(self.repository_label, repository_row)
         form.addRow("Goal", self.goal_edit)
+
+        self.analysis_view = QPlainTextEdit()
+        self.analysis_view.setReadOnly(True)
+        self.analysis_view.setPlaceholderText(
+            "Select an existing repository and choose Analyze Project."
+        )
+        self.analysis_view.setMinimumHeight(150)
+
+        self.import_docs_check = QCheckBox(
+            "Import detected documentation into project context"
+        )
+        self.import_docs_check.setChecked(True)
+        self.create_roadmap_check = QCheckBox(
+            "Create a Roadmap if one is missing"
+        )
+        self.run_init_check = QCheckBox(
+            "Run Init Agent if agent context is missing"
+        )
+        self.improve_readme_check = QCheckBox(
+            "Review README improvements with Init Agent"
+        )
+        self.setup_mode_combo = QComboBox()
+        self.setup_mode_combo.addItem("Auto · OpenCode when available", "auto")
+        self.setup_mode_combo.addItem("Mock · Repository-aware simulation", "mock")
+        self.setup_mode_combo.addItem("OpenCode · Require installed CLI", "opencode")
+
+        choices = QVBoxLayout()
+        choices.setSpacing(7)
+        choices.addWidget(self.import_docs_check)
+        choices.addWidget(self.create_roadmap_check)
+        choices.addWidget(self.run_init_check)
+        choices.addWidget(self.improve_readme_check)
+        setup_row = QHBoxLayout()
+        setup_row.addWidget(QLabel("Guided setup"))
+        setup_row.addWidget(self.setup_mode_combo, 1)
+        choices.addLayout(setup_row)
 
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Cancel
             | QDialogButtonBox.StandardButton.Ok
         )
-        buttons.button(QDialogButtonBox.StandardButton.Ok).setText(
-            "Create Project"
+        self.accept_button = buttons.button(
+            QDialogButtonBox.StandardButton.Ok
         )
-        buttons.button(QDialogButtonBox.StandardButton.Ok).setObjectName(
-            "primaryButton"
-        )
+        self.accept_button.setText("Import Project")
+        self.accept_button.setObjectName("primaryButton")
         buttons.accepted.connect(self._validate)
         buttons.rejected.connect(self.reject)
 
@@ -88,8 +140,17 @@ class NewProjectDialog(QDialog):
         layout.addWidget(description)
         layout.addSpacing(4)
         layout.addLayout(form)
-        layout.addStretch()
+        self.analysis_label = QLabel("Project analysis")
+        self.analysis_label.setObjectName("sectionLabel")
+        layout.addWidget(self.analysis_label)
+        layout.addWidget(self.analysis_view)
+        layout.addLayout(choices)
         layout.addWidget(buttons)
+        self._project_type_changed()
+
+    @property
+    def project_type(self) -> str:
+        return str(self.project_type_combo.currentData())
 
     @property
     def project_name(self) -> str:
@@ -97,35 +158,227 @@ class NewProjectDialog(QDialog):
 
     @property
     def repository(self) -> Path:
-        return Path(self.repository_edit.text().strip()).expanduser().resolve()
+        selected = (
+            Path(self.repository_edit.text().strip()).expanduser().resolve()
+        )
+        if self.project_type == "new":
+            return selected / self.project_name
+        return selected
 
     @property
     def goal(self) -> str:
         return self.goal_edit.toPlainText().strip()
 
+    @property
+    def analysis(self) -> ProjectAnalysis | None:
+        return self._analysis
+
+    @property
+    def setup_mode(self) -> str:
+        return str(self.setup_mode_combo.currentData())
+
+    @property
+    def import_documentation(self) -> bool:
+        return self.import_docs_check.isChecked()
+
+    @property
+    def create_missing_roadmap(self) -> bool:
+        return self.create_roadmap_check.isChecked()
+
+    @property
+    def run_missing_init(self) -> bool:
+        return self.run_init_check.isChecked()
+
+    @property
+    def improve_readme(self) -> bool:
+        return self.improve_readme_check.isChecked()
+
     def _browse(self) -> None:
         selected = QFileDialog.getExistingDirectory(
             self,
-            "Select repository",
+            (
+                "Select existing repository"
+                if self.project_type == "existing"
+                else "Select target parent folder"
+            ),
             self.repository_edit.text() or str(Path.home()),
         )
         if selected:
             path = Path(selected).resolve()
             self.repository_edit.setText(str(path))
-            if not self.name_edit.text().strip():
+            if (
+                self.project_type == "existing"
+                and not self.name_edit.text().strip()
+            ):
                 self.name_edit.setText(path.name)
 
-    def _validate(self) -> None:
-        if not self.project_name:
-            QMessageBox.warning(self, "Project name required", "Enter a name.")
-            return
-        if not self.repository_edit.text().strip() or not self.repository.is_dir():
+    def _project_type_changed(self) -> None:
+        existing = self.project_type == "existing"
+        self.repository_label.setText(
+            "Repository" if existing else "Target folder"
+        )
+        self.repository_edit.setPlaceholderText(
+            "Existing repository folder"
+            if existing
+            else "Parent folder for the new project"
+        )
+        self.analyze_button.setVisible(existing)
+        self.analysis_label.setVisible(existing)
+        self.analysis_view.setVisible(existing)
+        self.import_docs_check.setVisible(existing)
+        self.create_roadmap_check.setText(
+            "Create a Roadmap if one is missing"
+            if existing
+            else "Run Roadmap Agent during guided onboarding"
+        )
+        self.run_init_check.setText(
+            "Run Init Agent if agent context is missing"
+            if existing
+            else "Run Init Agent during guided onboarding"
+        )
+        self.create_roadmap_check.setChecked(not existing)
+        self.run_init_check.setChecked(not existing)
+        self.improve_readme_check.setVisible(existing)
+        self.accept_button.setText(
+            "Import Project" if existing else "Start Guided Setup"
+        )
+        self._analysis = None
+        self._analysis_repository = None
+
+    def _repository_changed(self) -> None:
+        self._analysis = None
+        self._analysis_repository = None
+        if self.project_type == "existing":
+            self.analysis_view.clear()
+
+    def _analyze_existing(self) -> None:
+        raw_path = self.repository_edit.text().strip()
+        if not raw_path:
             QMessageBox.warning(
                 self,
                 "Repository required",
                 "Select an existing local repository folder.",
             )
             return
+        repository = Path(raw_path).expanduser().resolve()
+        try:
+            analysis = ProjectAnalyzer().analyze(repository)
+        except ValueError as exc:
+            QMessageBox.warning(self, "Analysis failed", str(exc))
+            return
+        self._analysis = analysis
+        self._analysis_repository = repository
+        if not self.name_edit.text().strip():
+            self.name_edit.setText(repository.name)
+        self.create_roadmap_check.setChecked(not analysis.has_roadmap)
+        has_agent_file = any(
+            name in analysis.documentation_files
+            for name in ("AGENTS.md", "AGENT.md", "CLAUDE.md")
+        )
+        self.run_init_check.setChecked(not has_agent_file)
+        self.improve_readme_check.setChecked(False)
+        self.analysis_view.setPlainText(
+            "\n".join(
+                [
+                    f"Detected project type: {analysis.detected_project_type}",
+                    "Stack: "
+                    + (
+                        ", ".join(analysis.detected_stack)
+                        if analysis.detected_stack
+                        else "No language/framework markers detected"
+                    ),
+                    "Documentation: "
+                    + (
+                        ", ".join(analysis.documentation_files)
+                        if analysis.documentation_files
+                        else "None detected"
+                    ),
+                    "Missing important files: "
+                    + (
+                        ", ".join(analysis.missing_important_files)
+                        if analysis.missing_important_files
+                        else "None"
+                    ),
+                    "Roadmap: "
+                    + (analysis.roadmap_path or "missing"),
+                    "Init context: "
+                    + (
+                        ", ".join(analysis.init_paths)
+                        if analysis.init_paths
+                        else "missing"
+                    ),
+                    "",
+                    "Suggested next actions:",
+                    *[
+                        f"- {action}"
+                        for action in analysis.suggested_actions
+                    ],
+                ]
+            )
+        )
+
+    def _validate(self) -> None:
+        if not self.project_name:
+            QMessageBox.warning(self, "Project name required", "Enter a name.")
+            return
+        if not self.repository_edit.text().strip():
+            QMessageBox.warning(
+                self,
+                "Repository required",
+                "Select a repository or target folder.",
+            )
+            return
+        if self.project_type == "existing":
+            repository = Path(
+                self.repository_edit.text().strip()
+            ).expanduser().resolve()
+            if not repository.is_dir():
+                QMessageBox.warning(
+                    self,
+                    "Repository required",
+                    "Select an existing local repository folder.",
+                )
+                return
+            if (
+                self._analysis is None
+                or self._analysis_repository != repository
+            ):
+                self._analyze_existing()
+                if self._analysis is not None:
+                    QMessageBox.information(
+                        self,
+                        "Review project analysis",
+                        "Review the detected documentation and setup choices, "
+                        "then choose Import Project again.",
+                    )
+                return
+        else:
+            parent = Path(
+                self.repository_edit.text().strip()
+            ).expanduser().resolve()
+            if not parent.is_dir():
+                QMessageBox.warning(
+                    self,
+                    "Target folder required",
+                    "Select an existing parent folder for the new project.",
+                )
+                return
+            if not self.goal:
+                QMessageBox.warning(
+                    self,
+                    "Project goal required",
+                    "Describe the project goal before guided setup.",
+                )
+                return
+            target = self.repository
+            if target.exists() and any(target.iterdir()):
+                QMessageBox.warning(
+                    self,
+                    "Target is not empty",
+                    "Choose a project name whose target folder does not exist "
+                    "or is empty.",
+                )
+                return
         self.accept()
 
 

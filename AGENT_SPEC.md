@@ -53,6 +53,42 @@ agent's permitted work, not the quality or trustworthiness of the model.
 | `code_reviewer` | Correctness, regression, safety, maintainability, and missing-test review. Runs after tests. | Review | No | No | Low | `plan` |
 | `documentation_writer` | README, API docs, migration notes, and user/developer guidance. Runs near the end. | Documentation | Yes | No | Low | `plan` |
 
+## Project Review Agents
+
+Roadmap and Init are project-level review agents, not code-modifying task stages.
+
+### Roadmap Agent
+
+- OpenCode mapping: `plan`
+- Permissions: repository read and structured response only
+- Inputs: repository path, goal, target users, MVP scope, constraints, notes,
+  README excerpt, detected stack, and bounded structure summary
+- Outputs: Markdown roadmap, summary, observations, milestones, next tasks,
+  risks, and testing strategy
+- Revision input: previous draft plus user feedback
+- Prohibited: file writes, destructive commands, automatic acceptance, or
+  direct export
+
+### Init Agent
+
+- OpenCode mapping: `plan`
+- Permissions: repository read and structured response only
+- Inputs: repository path, init goal, README excerpt, detected stack, bounded
+  structure summary, and existing conventions
+- Outputs: complete proposed file contents, observations, and setup notes
+- Revision input: previous proposals plus user feedback
+- Prohibited: direct `/init` writes, setup execution, migrations, or unconfirmed
+  repository changes
+
+Both agents use strict JSON output contracts. GoethePlaner hydrates Init
+proposals with current content and unified diffs before review. Mock mode uses
+the same draft and revision contract.
+
+After coding tasks complete, GoethePlaner creates deterministic pending Roadmap
+and Init update suggestions from the task completion summary. These suggestions
+are not code-modifying agent stages, do not write files, and require explicit
+acceptance in the project resource view.
+
 The concrete system prompts live in
 `agentboard/app/core/agent_registry.py`. Every prompt states the internal role,
 scope, task, repository, constraints, and expected result. Prompt text

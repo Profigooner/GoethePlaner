@@ -6,6 +6,7 @@ from PySide6.QtCore import QThread
 from PySide6.QtWidgets import (
     QDialog,
     QFileDialog,
+    QInputDialog,
     QMainWindow,
     QMessageBox,
 )
@@ -17,25 +18,25 @@ from agentboard.app.core.git_manager import (
     RejectWorker,
     RepositoryState,
 )
-from agentboard.app.core.init_generator import (
-    InitGenerator,
-    InitPlanResult,
-)
-from agentboard.app.core.project_generation import (
-    ProjectGenerationResult,
-    ProjectGenerationWorker,
-)
-from agentboard.app.core.roadmap_generator import RoadmapResult
+from agentboard.app.core.project_analysis import ProjectAnalyzer
+from agentboard.app.core.project_updates import ProjectUpdateService
 from agentboard.app.core.task_manager import WorkflowWorker
 from agentboard.app.core.test_runner import (
     TestRunResult,
     TestRunner,
     TestWorker,
 )
-from agentboard.app.models import Project, Task, TaskStatus
+from agentboard.app.models import (
+    Project,
+    ProjectDocument,
+    ProjectResourceStatus,
+    Task,
+    TaskStatus,
+)
 from agentboard.app.utils.config import AppConfig
 
 from .dialogs import NewProjectDialog, NewTaskDialog
+from .project_dialogs import InitDialog, RoadmapDialog
 from .task_dashboard import TaskDashboard
 from .theme import application_stylesheet
 
@@ -56,8 +57,6 @@ class MainWindow(QMainWindow):
         self.test_thread: QThread | None = None
         self.reject_worker: RejectWorker | None = None
         self.reject_thread: QThread | None = None
-        self.project_generation_worker: ProjectGenerationWorker | None = None
-        self.project_generation_thread: QThread | None = None
         self.dashboard = TaskDashboard()
         self.setCentralWidget(self.dashboard)
         self.setWindowTitle("GoethePlaner")
@@ -67,7 +66,13 @@ class MainWindow(QMainWindow):
 
         self.dashboard.new_project_requested.connect(self._new_project)
         self.dashboard.project_selected.connect(self._select_project)
+        self.dashboard.navigation_selected.connect(
+            self._select_navigation_item
+        )
         self.dashboard.new_task_requested.connect(self._new_task)
+        self.dashboard.new_task_for_project.connect(
+            self._new_task_for_project
+        )
         self.dashboard.task_selected.connect(self._select_task)
         self.dashboard.create_requested.connect(self._validate_task_input)
         self.dashboard.cancel_requested.connect(self._cancel_task)
@@ -78,10 +83,10 @@ class MainWindow(QMainWindow):
         self.dashboard.accept_requested.connect(self._accept_changes)
         self.dashboard.reject_requested.connect(self._confirm_reject)
         self.dashboard.generate_roadmap_requested.connect(
-            lambda: self._start_project_generation("roadmap")
+            self._open_roadmap_dialog
         )
         self.dashboard.generate_init_requested.connect(
-            lambda: self._start_project_generation("init")
+            self._open_init_dialog
         )
         self.dashboard.open_roadmap_requested.connect(
             lambda: self.dashboard.show_project_overview("roadmap")
@@ -90,10 +95,33 @@ class MainWindow(QMainWindow):
             self._show_project_settings
         )
         self.dashboard.export_roadmap_requested.connect(
-            self._export_roadmap
+            self._open_roadmap_dialog
         )
-        self.dashboard.export_init_requested.connect(self._export_init)
-        self.dashboard.apply_init_requested.connect(self._apply_init)
+        self.dashboard.export_init_requested.connect(self._open_init_dialog)
+        self.dashboard.apply_init_requested.connect(
+            lambda _selected: self._open_init_dialog()
+        )
+        self.dashboard.roadmap_content_saved.connect(
+            self._save_roadmap_content
+        )
+        self.dashboard.roadmap_requirement_requested.connect(
+            self._add_roadmap_requirement
+        )
+        self.dashboard.roadmap_import_requested.connect(
+            self._import_roadmap
+        )
+        self.dashboard.init_import_requested.connect(
+            self._import_init_context
+        )
+        self.dashboard.roadmap_task_requested.connect(
+            self._new_task_from_roadmap
+        )
+        self.dashboard.suggestion_accept_requested.connect(
+            self._accept_project_suggestion
+        )
+        self.dashboard.suggestion_reject_requested.connect(
+            self._reject_project_suggestion
+        )
         if config.test_command:
             self.dashboard.test_command_edit.setText(
                 " ".join(config.test_command)
@@ -117,14 +145,68 @@ class MainWindow(QMainWindow):
         project = Project(
             dialog.project_name,
             dialog.repository,
+            project_type=dialog.project_type,
             goal=dialog.goal,
         )
+        if dialog.project_type == "new":
+            try:
+                project.repo_path.mkdir(parents=False, exist_ok=True)
+            except OSError as exc:
+                QMessageBox.critical(
+                    self, "Could not create project folder", str(exc)
+                )
+                return
+            if dialog.create_missing_roadmap:
+                self._run_guided_roadmap(project, dialog.setup_mode)
+                if (
+                    project.roadmap_status
+                    != ProjectResourceStatus.ACCEPTED.value
+                ):
+                    QMessageBox.information(
+                        self,
+                        "Guided setup incomplete",
+                        "The folder remains available, but the project was not "
+                        "added because the Roadmap was not accepted.",
+                    )
+                    return
+            if dialog.run_missing_init:
+                self._run_guided_init(project, dialog.setup_mode)
+                if (
+                    project.init_status
+                    != ProjectResourceStatus.ACCEPTED.value
+                ):
+                    QMessageBox.information(
+                        self,
+                        "Guided setup incomplete",
+                        "The folder remains available, but the project was not "
+                        "added because Init proposals were not applied.",
+                    )
+                    return
+        else:
+            analysis = dialog.analysis or ProjectAnalyzer().analyze(
+                project.repo_path
+            )
+            project.set_analysis(analysis)
+            if dialog.import_documentation:
+                ProjectAnalyzer().import_existing_documents(project, analysis)
         self.projects.append(project)
         self.current_project = project
         self.current_task = None
         self._refresh_project_navigation()
         self.dashboard.set_project(project)
+        self.dashboard.show_project_overview()
+        self.dashboard.sidebar.select_item(
+            project.id, "project", project.id
+        )
         self.statusBar().showMessage(f"Project {project.name} created.")
+        if dialog.project_type == "existing":
+            if dialog.create_missing_roadmap and not project.roadmap:
+                self._open_roadmap_dialog()
+            if (
+                (dialog.run_missing_init and not project.init_plan)
+                or dialog.improve_readme
+            ):
+                self._open_init_dialog()
 
     def _select_project(self, project_id: str) -> None:
         project = next(
@@ -133,16 +215,44 @@ class MainWindow(QMainWindow):
         if project is None:
             return
         self.current_project = project
-        self.current_task = project.tasks[-1] if project.tasks else None
+        self.current_task = None
         self._refresh_project_navigation()
         self.dashboard.set_project(project)
-        if self.current_task is not None:
-            self.dashboard.show_task(self.current_task)
-        else:
-            self.dashboard.show_project_overview()
+        self.dashboard.show_project_overview()
+        self.dashboard.sidebar.select_item(
+            project.id, "project", project.id
+        )
         self.statusBar().showMessage(f"Project {project.name} selected.")
 
-    def _new_task(self) -> None:
+    def _select_navigation_item(
+        self, project_id: str, kind: str, item_id: str
+    ) -> None:
+        project = next(
+            (item for item in self.projects if item.id == project_id), None
+        )
+        if project is None:
+            return
+        self.current_project = project
+        self.dashboard.set_project(project)
+        self.dashboard.sidebar.select_item(project_id, kind, item_id)
+        if kind == "roadmap":
+            self.current_task = None
+            self.dashboard.show_project_overview("roadmap")
+        elif kind == "init":
+            self.current_task = None
+            self.dashboard.show_project_overview("init")
+        elif kind == "task":
+            self._select_task(item_id)
+        else:
+            self.current_task = None
+            self.dashboard.show_project_overview()
+        self._refresh_project_navigation()
+
+    def _new_task_for_project(self, project_id: str) -> None:
+        self._select_project(project_id)
+        self._new_task()
+
+    def _new_task(self, seed: str = "") -> None:
         if self.current_project is None:
             QMessageBox.information(
                 self,
@@ -162,6 +272,11 @@ class MainWindow(QMainWindow):
             self.current_project.repo_path.name,
             parent=self,
         )
+        if seed:
+            dialog.title_edit.setText(seed[:96])
+            dialog.prompt_edit.setPlainText(
+                f"Implement this Roadmap requirement:\n\n{seed}"
+            )
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
         self.start_task(
@@ -198,6 +313,9 @@ class MainWindow(QMainWindow):
         self.dashboard.show_task(task)
         self.dashboard.set_running(self.workflow_thread is not None)
         self.dashboard.set_tasks(self.current_project.tasks, task.id)
+        self.dashboard.sidebar.select_item(
+            self.current_project.id, "task", task.id
+        )
         self.statusBar().showMessage(f"Task {task.title} selected.")
 
     def _validate_task_input(
@@ -264,7 +382,7 @@ class MainWindow(QMainWindow):
         )
         worker.subtasks_ready.connect(self.dashboard.set_subtasks)
         worker.agent_changed.connect(self.dashboard.add_or_update_agent)
-        worker.event_emitted.connect(self.dashboard.logs.append_event)
+        worker.event_emitted.connect(self.dashboard.append_event)
         worker.baseline_ready.connect(self._store_baseline)
         worker.repository_state_ready.connect(self._show_repository_state)
         worker.completed.connect(self._workflow_completed)
@@ -286,9 +404,22 @@ class MainWindow(QMainWindow):
     def _workflow_completed(self, task: Task) -> None:
         self.current_task = task
         if self.current_project is not None:
+            suggestions = ProjectUpdateService().create_for_completed_task(
+                self.current_project, task
+            )
             self.current_project.touch()
             self._refresh_project_navigation()
+            self.dashboard.set_project(self.current_project)
             self.dashboard.set_tasks(self.current_project.tasks, task.id)
+            self.dashboard.show_task(task)
+            self.dashboard.add_problem(
+                "Task completed. Review pending Roadmap and Init update "
+                "suggestions before changing project context."
+            )
+            self.dashboard.task_detail.update_notice.setText(
+                f"{len(suggestions)} project update suggestions await review."
+            )
+        self.dashboard.set_completion_summary(task.completion_summary)
         self.dashboard.set_decision_enabled(
             True, self.current_baseline is not None
         )
@@ -297,7 +428,7 @@ class MainWindow(QMainWindow):
             if detected:
                 self.dashboard.test_command_edit.setText(" ".join(detected))
         self.statusBar().showMessage(
-            "Workflow complete. Review the generated result."
+            "Workflow complete. Review Output and project update suggestions."
         )
 
     def _task_state_changed(self, status: str, progress: int) -> None:
@@ -320,6 +451,7 @@ class MainWindow(QMainWindow):
 
     def _workflow_failed(self, message: str) -> None:
         self.statusBar().showMessage("Workflow failed.")
+        self.dashboard.add_problem(message)
         QMessageBox.critical(self, "Workflow failed", message)
 
     def _workflow_thread_finished(self) -> None:
@@ -377,11 +509,15 @@ class MainWindow(QMainWindow):
 
         self.dashboard.test_output.clear()
         self.dashboard.test_output.appendPlainText(f"$ {command_text}\n")
+        self.dashboard.toggle_bottom_tool("Tests")
         thread = QThread(self)
         worker = TestWorker(self.current_task.repository, command_text)
         worker.moveToThread(thread)
         thread.started.connect(worker.run)
         worker.output.connect(self.dashboard.test_output.appendPlainText)
+        worker.output.connect(
+            self.dashboard.bottom_tool_window.terminal.appendPlainText
+        )
         worker.completed.connect(self._tests_completed)
         worker.failed.connect(self._tests_failed)
         worker.terminal.connect(thread.quit)
@@ -402,6 +538,7 @@ class MainWindow(QMainWindow):
         self.dashboard.test_output.appendPlainText(
             f"\nCould not run tests: {message}"
         )
+        self.dashboard.add_problem(f"Tests could not run: {message}")
 
     def _test_thread_finished(self) -> None:
         self.test_worker = None
@@ -527,197 +664,198 @@ class MainWindow(QMainWindow):
         selected = self.current_project.id if self.current_project else None
         self.dashboard.set_projects(self.projects, selected)
 
-    def _start_project_generation(self, kind: str) -> None:
+    def _run_guided_roadmap(self, project: Project, mode: str) -> None:
+        dialog = RoadmapDialog(project, self.config, self)
+        index = dialog.mode_combo.findData(mode)
+        if index >= 0:
+            dialog.mode_combo.setCurrentIndex(index)
+        dialog.exec()
+
+    def _run_guided_init(self, project: Project, mode: str) -> None:
+        dialog = InitDialog(project, self.config, self)
+        index = dialog.mode_combo.findData(mode)
+        if index >= 0:
+            dialog.mode_combo.setCurrentIndex(index)
+        dialog.exec()
+
+    def _save_roadmap_content(self, content: str) -> None:
         if self.current_project is None:
             return
-        if self.workflow_thread is not None:
-            QMessageBox.information(
-                self,
-                "Workflow running",
-                "Wait for the active coding workflow before generating a "
-                "project plan.",
-            )
-            return
-        if self.project_generation_thread is not None:
-            self.statusBar().showMessage(
-                "A project plan is already being generated."
-            )
-            return
-        thread = QThread(self)
-        worker = ProjectGenerationWorker(self.current_project, kind)
-        worker.moveToThread(thread)
-        thread.started.connect(worker.run)
-        worker.completed.connect(self._project_generation_completed)
-        worker.failed.connect(self._project_generation_failed)
-        worker.terminal.connect(thread.quit)
-        worker.terminal.connect(worker.deleteLater)
-        thread.finished.connect(self._project_generation_thread_finished)
-        self.project_generation_worker = worker
-        self.project_generation_thread = thread
-        self.dashboard.set_project_generation_running(True)
-        label = "roadmap" if kind == "roadmap" else "init plan"
-        self.statusBar().showMessage(f"Generating {label}...")
-        thread.start()
-
-    def _project_generation_completed(
-        self, generated: ProjectGenerationResult
-    ) -> None:
-        project = next(
-            (
-                item
-                for item in self.projects
-                if item.id == generated.project_id
-            ),
-            None,
-        )
-        if project is None:
-            return
-        if isinstance(generated.result, RoadmapResult):
-            project.set_roadmap(
-                generated.result.markdown,
-                list(generated.result.suggested_next_tasks),
-            )
-            tab = "roadmap"
-            message = "Project roadmap generated."
-        elif isinstance(generated.result, InitPlanResult):
-            project.set_init_plan(
-                generated.result.markdown,
-                list(generated.result.candidate_files),
-                list(generated.result.existing_files),
-                list(generated.result.warnings),
-            )
-            tab = "init"
-            message = "Safe init plan generated."
-        else:
-            return
-        if self.current_project is project:
-            self.current_task = None
-            self.dashboard.set_project(project)
-            self.dashboard.show_project_overview(tab)
+        self.current_project.update_roadmap(content)
+        self.dashboard.set_project(self.current_project)
+        self.dashboard.show_project_overview("roadmap")
         self._refresh_project_navigation()
-        self.statusBar().showMessage(message)
+        self.statusBar().showMessage("Roadmap updated in project context.")
 
-    def _project_generation_failed(self, message: str) -> None:
-        QMessageBox.critical(
-            self, "Project generation failed", message
-        )
-        self.statusBar().showMessage("Project generation failed.")
-
-    def _project_generation_thread_finished(self) -> None:
-        self.project_generation_worker = None
-        thread = self.project_generation_thread
-        self.project_generation_thread = None
-        if thread is not None:
-            thread.deleteLater()
-        self.dashboard.set_project_generation_running(False)
-
-    def _export_roadmap(self) -> None:
+    def _add_roadmap_requirement(self) -> None:
         if self.current_project is None:
             return
-        self._export_text(
-            self.current_project.roadmap,
-            "Export Roadmap",
-            self.current_project.repo_path / "ROADMAP.generated.md",
-        )
-
-    def _export_init(self) -> None:
-        if self.current_project is None:
-            return
-        self._export_text(
-            self.current_project.init_plan,
-            "Export Init Plan",
-            self.current_project.repo_path / "INIT.generated.md",
-        )
-
-    def _export_text(
-        self, content: str, title: str, suggested_path: Path
-    ) -> None:
-        if not content:
-            QMessageBox.information(
-                self, title, "Generate this project plan before exporting it."
-            )
-            return
-        selected, _ = QFileDialog.getSaveFileName(
+        requirement, accepted = QInputDialog.getText(
             self,
-            title,
-            str(suggested_path),
-            "Markdown (*.md);;Text files (*.txt);;All files (*)",
+            "Add Roadmap Requirement",
+            "Requirement",
         )
+        if not accepted or not requirement.strip():
+            return
+        self.current_project.add_roadmap_requirement(requirement)
+        self.dashboard.set_project(self.current_project)
+        self.dashboard.show_project_overview("roadmap")
+        self._refresh_project_navigation()
+
+    def _import_roadmap(self) -> None:
+        if self.current_project is None:
+            return
+        default = self.current_project.repo_path / "ROADMAP.md"
+        selected = str(default) if default.is_file() else ""
+        if not selected:
+            selected, _ = QFileDialog.getOpenFileName(
+                self,
+                "Import Roadmap",
+                str(self.current_project.repo_path),
+                "Markdown (*.md);;Text files (*.txt);;All files (*)",
+            )
         if not selected:
             return
-        target = Path(selected)
-        if target.exists():
+        if self.current_project.roadmap:
             answer = QMessageBox.question(
                 self,
-                "Replace existing file?",
-                f"{target.name} already exists. Replace it?",
+                "Replace project Roadmap context?",
+                "Import replaces the in-memory Roadmap context only. It does "
+                "not modify either file. Continue?",
                 QMessageBox.StandardButton.Yes
                 | QMessageBox.StandardButton.No,
                 QMessageBox.StandardButton.No,
             )
             if answer != QMessageBox.StandardButton.Yes:
                 return
+        path = Path(selected)
         try:
-            target.write_text(content, encoding="utf-8")
+            content = path.read_text(
+                encoding="utf-8", errors="replace"
+            )[:100_000]
         except OSError as exc:
-            QMessageBox.critical(self, "Export failed", str(exc))
+            QMessageBox.critical(self, "Roadmap import failed", str(exc))
             return
-        self.statusBar().showMessage(f"Exported {target.name}.")
+        try:
+            relative = str(path.resolve().relative_to(
+                self.current_project.repo_path.resolve()
+            ))
+        except ValueError:
+            relative = str(path)
+        self.current_project.add_document(
+            ProjectDocument(
+                project_id=self.current_project.id,
+                kind="roadmap",
+                path=relative,
+                content=content,
+            )
+        )
+        self.current_project.update_roadmap(
+            content, ProjectResourceStatus.IMPORTED.value
+        )
+        self.dashboard.set_project(self.current_project)
+        self.dashboard.show_project_overview("roadmap")
+        self._refresh_project_navigation()
 
-    def _apply_init(self, selected_files: object) -> None:
+    def _import_init_context(self) -> None:
         if self.current_project is None:
             return
-        if self.workflow_thread is not None:
-            QMessageBox.information(
-                self,
-                "Workflow running",
-                "Wait for the active coding workflow before creating init files.",
+        try:
+            analysis = ProjectAnalyzer().analyze(
+                self.current_project.repo_path
             )
+            self.current_project.set_analysis(analysis)
+            imported = ProjectAnalyzer().import_existing_documents(
+                self.current_project, analysis
+            )
+        except (OSError, ValueError) as exc:
+            QMessageBox.critical(self, "Init import failed", str(exc))
             return
-        files = (
-            [
-                str(item)
-                for item in selected_files
-                if isinstance(item, str)
-            ]
-            if isinstance(selected_files, list)
-            else []
+        self.dashboard.set_project(self.current_project)
+        self.dashboard.show_project_overview("init")
+        self._refresh_project_navigation()
+        self.statusBar().showMessage(
+            f"Imported {len(imported)} project document(s) without file changes."
         )
-        if not files:
-            QMessageBox.information(
-                self,
-                "Select init files",
-                "Select one or more missing files to create.",
-            )
+
+    def _new_task_from_roadmap(self, requirement: str) -> None:
+        self._new_task(requirement)
+
+    def _accept_project_suggestion(self, suggestion_id: str) -> None:
+        if self.current_project is None:
             return
         answer = QMessageBox.question(
             self,
-            "Create selected files?",
-            "Only missing files will be created. Existing files are never "
-            "overwritten.\n\n" + "\n".join(files),
+            "Apply project context update?",
+            "Apply this suggestion to GoethePlaner's in-memory project context? "
+            "No repository file will be changed.",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )
         if answer != QMessageBox.StandardButton.Yes:
             return
         try:
-            created = InitGenerator().apply_selected(
-                self.current_project, files
-            )
-            refreshed = InitGenerator().generate(self.current_project)
-        except OSError as exc:
-            QMessageBox.critical(self, "Init apply failed", str(exc))
+            self.current_project.apply_update_suggestion(suggestion_id)
+        except ValueError as exc:
+            QMessageBox.warning(self, "Could not apply suggestion", str(exc))
             return
-        self.current_project.set_init_plan(
-            refreshed.markdown,
-            list(refreshed.candidate_files),
-            list(refreshed.existing_files),
-            list(refreshed.warnings),
+        self.dashboard.set_project(self.current_project)
+        self._refresh_project_navigation()
+
+    def _reject_project_suggestion(self, suggestion_id: str) -> None:
+        if self.current_project is None:
+            return
+        try:
+            self.current_project.reject_update_suggestion(suggestion_id)
+        except ValueError as exc:
+            QMessageBox.warning(self, "Could not reject suggestion", str(exc))
+            return
+        self.dashboard.set_project(self.current_project)
+        self._refresh_project_navigation()
+
+    def _open_roadmap_dialog(self) -> None:
+        if self.current_project is None:
+            return
+        if self.workflow_thread is not None:
+            QMessageBox.information(
+                self,
+                "Workflow running",
+                "Wait for the active coding workflow before running the "
+                "Roadmap Agent.",
+            )
+            return
+        dialog = RoadmapDialog(self.current_project, self.config, self)
+        dialog.exec()
+        self.current_task = None
+        self.dashboard.set_project(self.current_project)
+        self.dashboard.show_project_overview("roadmap")
+        self.dashboard.sidebar.select_item(
+            self.current_project.id, "roadmap", "roadmap"
         )
+        self._refresh_project_navigation()
+        self.statusBar().showMessage("Roadmap review closed.")
+
+    def _open_init_dialog(self) -> None:
+        if self.current_project is None:
+            return
+        if self.workflow_thread is not None:
+            QMessageBox.information(
+                self,
+                "Workflow running",
+                "Wait for the active coding workflow before running the Init Agent.",
+            )
+            return
+        dialog = InitDialog(self.current_project, self.config, self)
+        dialog.exec()
+        self.current_task = None
         self.dashboard.set_project(self.current_project)
         self.dashboard.show_project_overview("init")
+        self.dashboard.sidebar.select_item(
+            self.current_project.id, "init", "init"
+        )
+        self._refresh_project_navigation()
         self.statusBar().showMessage(
-            f"Created {len(created)} missing init item(s)."
+            "Init Agent review closed."
         )
 
     def _show_project_settings(self) -> None:
@@ -748,11 +886,6 @@ class MainWindow(QMainWindow):
         if self.reject_thread is not None:
             self.reject_thread.quit()
             if not self.reject_thread.wait(5_000):
-                event.ignore()
-                return
-        if self.project_generation_thread is not None:
-            self.project_generation_thread.quit()
-            if not self.project_generation_thread.wait(3_000):
                 event.ignore()
                 return
         super().closeEvent(event)

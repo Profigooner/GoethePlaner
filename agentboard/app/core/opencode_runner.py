@@ -10,7 +10,17 @@ from pathlib import Path
 from threading import Event
 from typing import Callable, Protocol
 
+from agentboard.app.models import InitDraft, Project, RoadmapDraft
 from agentboard.app.utils.config import AppConfig
+
+from .project_agents import (
+    build_init_prompt,
+    build_roadmap_prompt,
+    mock_init_draft,
+    mock_roadmap_draft,
+    parse_init_output,
+    parse_roadmap_output,
+)
 
 
 LogCallback = Callable[[str], None]
@@ -23,6 +33,9 @@ class AgentRunResult:
     return_code: int
     summary: str
     cancelled: bool = False
+    command: tuple[str, ...] = ()
+    stdout: str = ""
+    stderr: str = ""
 
 
 class AgentRunner(Protocol):
@@ -79,6 +92,133 @@ class MockOpenCodeRunner:
             summary=f"{agent_name} completed its mock assignment.",
         )
 
+    def run_roadmap_agent(
+        self,
+        project: Project,
+        goal: str,
+        constraints: str = "",
+        *,
+        target_users: str = "",
+        mvp_scope: str = "",
+        notes: str = "",
+        cancel_event: Event | None = None,
+        on_log: LogCallback | None = None,
+        on_progress: ProgressCallback | None = None,
+    ) -> RoadmapDraft:
+        self._project_steps(
+            "Roadmap Agent",
+            project.repo_path,
+            cancel_event,
+            on_log,
+            on_progress,
+        )
+        return mock_roadmap_draft(
+            project,
+            goal,
+            constraints,
+            target_users=target_users,
+            mvp_scope=mvp_scope,
+            notes=notes,
+        )
+
+    def revise_roadmap_agent(
+        self,
+        project: Project,
+        previous_draft: RoadmapDraft,
+        feedback: str,
+        *,
+        constraints: str = "",
+        target_users: str = "",
+        mvp_scope: str = "",
+        notes: str = "",
+        cancel_event: Event | None = None,
+        on_log: LogCallback | None = None,
+        on_progress: ProgressCallback | None = None,
+    ) -> RoadmapDraft:
+        self._project_steps(
+            "Roadmap Revision Agent",
+            project.repo_path,
+            cancel_event,
+            on_log,
+            on_progress,
+        )
+        return mock_roadmap_draft(
+            project,
+            previous_draft.user_goal,
+            constraints,
+            target_users=target_users,
+            mvp_scope=mvp_scope,
+            notes=notes,
+            previous_draft=previous_draft,
+            feedback=feedback,
+        )
+
+    def run_init_agent(
+        self,
+        project: Project,
+        goal: str,
+        *,
+        cancel_event: Event | None = None,
+        on_log: LogCallback | None = None,
+        on_progress: ProgressCallback | None = None,
+    ) -> InitDraft:
+        self._project_steps(
+            "Init Agent",
+            project.repo_path,
+            cancel_event,
+            on_log,
+            on_progress,
+        )
+        return mock_init_draft(project, goal)
+
+    def revise_init_agent(
+        self,
+        project: Project,
+        previous_draft: InitDraft,
+        feedback: str,
+        *,
+        cancel_event: Event | None = None,
+        on_log: LogCallback | None = None,
+        on_progress: ProgressCallback | None = None,
+    ) -> InitDraft:
+        self._project_steps(
+            "Init Revision Agent",
+            project.repo_path,
+            cancel_event,
+            on_log,
+            on_progress,
+        )
+        return mock_init_draft(
+            project,
+            previous_draft.user_goal,
+            previous_draft=previous_draft,
+            feedback=feedback,
+        )
+
+    def _project_steps(
+        self,
+        label: str,
+        repository: Path,
+        cancel_event: Event | None,
+        on_log: LogCallback | None,
+        on_progress: ProgressCallback | None,
+    ) -> None:
+        cancel = cancel_event or Event()
+        log = on_log or (lambda _message: None)
+        progress = on_progress or (lambda _value, _message: None)
+        log(f"Mock mode: {label} inspecting {repository}.")
+        for value, message in (
+            (10, "Reading repository structure"),
+            (35, "Reviewing project conventions"),
+            (65, "Preparing structured draft"),
+            (90, "Checking safety boundaries"),
+            (100, "Draft ready for review"),
+        ):
+            if cancel.wait(self.step_delay):
+                raise RuntimeError(f"{label} was cancelled.")
+            progress(value, message)
+            log(message)
+
 
 class OpenCodeRunner:
     def __init__(self, command_template: str) -> None:
@@ -126,6 +266,7 @@ class OpenCodeRunner:
         on_progress: ProgressCallback,
     ) -> AgentRunResult:
         command = self.build_command(agent_name, repo_path, prompt)
+        on_log(f"$ {shlex.join(command)}")
         on_log(f"Starting OpenCode agent: {agent_name}")
         on_progress(2, "Starting OpenCode process")
 
@@ -134,7 +275,7 @@ class OpenCodeRunner:
                 command,
                 cwd=repo_path,
                 stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
+                stderr=subprocess.PIPE,
                 text=True,
                 encoding="utf-8",
                 errors="replace",
@@ -146,77 +287,119 @@ class OpenCodeRunner:
                 success=False,
                 return_code=127,
                 summary=f"Could not start OpenCode: {exc}",
+                command=tuple(command),
+                stderr=str(exc),
             )
 
-        output_queue: queue.Queue[str | None] = queue.Queue()
-        reader = threading.Thread(
+        output_queue: queue.Queue[tuple[str, str | None]] = queue.Queue()
+        stdout_reader = threading.Thread(
             target=self._read_output,
-            args=(process, output_queue),
+            args=(process.stdout, "stdout", output_queue),
             daemon=True,
         )
-        reader.start()
+        stderr_reader = threading.Thread(
+            target=self._read_output,
+            args=(process.stderr, "stderr", output_queue),
+            daemon=True,
+        )
+        stdout_reader.start()
+        stderr_reader.start()
         line_count = 0
+        stdout_lines: list[str] = []
+        stderr_lines: list[str] = []
 
-        while process.poll() is None or reader.is_alive():
+        while (
+            process.poll() is None
+            or stdout_reader.is_alive()
+            or stderr_reader.is_alive()
+        ):
             if cancel_event.is_set():
                 self._stop_process(process)
-                reader.join(timeout=1)
+                stdout_reader.join(timeout=1)
+                stderr_reader.join(timeout=1)
                 return AgentRunResult(
                     success=False,
                     return_code=130,
                     summary="OpenCode agent cancelled.",
                     cancelled=True,
+                    command=tuple(command),
+                    stdout="".join(stdout_lines),
+                    stderr="".join(stderr_lines),
                 )
 
             try:
-                line = output_queue.get(timeout=0.1)
+                source, line = output_queue.get(timeout=0.1)
             except queue.Empty:
                 continue
             if line is None:
                 continue
             line_count += 1
-            on_log(line.rstrip())
+            if source == "stdout":
+                stdout_lines.append(line)
+            else:
+                stderr_lines.append(line)
+            on_log(f"[{source}] {line.rstrip()}")
             estimated = min(90, 5 + line_count * 2)
             on_progress(estimated, "OpenCode is working")
 
-        reader.join(timeout=1)
+        stdout_reader.join(timeout=1)
+        stderr_reader.join(timeout=1)
         return_code = process.wait()
-        self._drain_output(output_queue, on_log)
+        self._drain_output(
+            output_queue,
+            on_log,
+            stdout_lines,
+            stderr_lines,
+        )
         if return_code == 0:
             on_progress(100, "Complete")
             return AgentRunResult(
                 success=True,
                 return_code=0,
                 summary=f"{agent_name} completed successfully.",
+                command=tuple(command),
+                stdout="".join(stdout_lines),
+                stderr="".join(stderr_lines),
             )
         return AgentRunResult(
             success=False,
             return_code=return_code,
             summary=f"OpenCode exited with status {return_code}.",
+            command=tuple(command),
+            stdout="".join(stdout_lines),
+            stderr="".join(stderr_lines),
         )
 
     @staticmethod
     def _read_output(
-        process: subprocess.Popen[str],
-        output_queue: queue.Queue[str | None],
+        stream,
+        source: str,
+        output_queue: queue.Queue[tuple[str, str | None]],
     ) -> None:
-        if process.stdout is not None:
-            for line in process.stdout:
-                output_queue.put(line)
-            process.stdout.close()
-        output_queue.put(None)
+        if stream is not None:
+            for line in stream:
+                output_queue.put((source, line))
+            stream.close()
+        output_queue.put((source, None))
 
     @staticmethod
     def _drain_output(
-        output_queue: queue.Queue[str | None], on_log: LogCallback
+        output_queue: queue.Queue[tuple[str, str | None]],
+        on_log: LogCallback,
+        stdout_lines: list[str],
+        stderr_lines: list[str],
     ) -> None:
         while True:
             try:
-                line = output_queue.get_nowait()
+                source, line = output_queue.get_nowait()
             except queue.Empty:
                 return
             if line is not None:
-                on_log(line.rstrip())
+                if source == "stdout":
+                    stdout_lines.append(line)
+                else:
+                    stderr_lines.append(line)
+                on_log(f"[{source}] {line.rstrip()}")
 
     @staticmethod
     def _stop_process(process: subprocess.Popen[str]) -> None:
@@ -228,6 +411,148 @@ class OpenCodeRunner:
         except subprocess.TimeoutExpired:
             process.kill()
             process.wait(timeout=3)
+
+    def run_roadmap_agent(
+        self,
+        project: Project,
+        goal: str,
+        constraints: str = "",
+        *,
+        target_users: str = "",
+        mvp_scope: str = "",
+        notes: str = "",
+        cancel_event: Event | None = None,
+        on_log: LogCallback | None = None,
+        on_progress: ProgressCallback | None = None,
+    ) -> RoadmapDraft:
+        prompt = build_roadmap_prompt(
+            project,
+            goal,
+            constraints,
+            target_users=target_users,
+            mvp_scope=mvp_scope,
+            notes=notes,
+        )
+        result = self._run_project_agent(
+            project, prompt, cancel_event, on_log, on_progress
+        )
+        draft = parse_roadmap_output(project, goal, result.stdout)
+        self._attach_diagnostics(draft, result)
+        return draft
+
+    def revise_roadmap_agent(
+        self,
+        project: Project,
+        previous_draft: RoadmapDraft,
+        feedback: str,
+        *,
+        constraints: str = "",
+        target_users: str = "",
+        mvp_scope: str = "",
+        notes: str = "",
+        cancel_event: Event | None = None,
+        on_log: LogCallback | None = None,
+        on_progress: ProgressCallback | None = None,
+    ) -> RoadmapDraft:
+        prompt = build_roadmap_prompt(
+            project,
+            previous_draft.user_goal,
+            constraints,
+            target_users=target_users,
+            mvp_scope=mvp_scope,
+            notes=notes,
+            previous_draft=previous_draft,
+            feedback=feedback,
+        )
+        result = self._run_project_agent(
+            project, prompt, cancel_event, on_log, on_progress
+        )
+        draft = parse_roadmap_output(
+            project,
+            previous_draft.user_goal,
+            result.stdout,
+            previous_draft=previous_draft,
+            feedback=feedback,
+        )
+        self._attach_diagnostics(draft, result)
+        return draft
+
+    def run_init_agent(
+        self,
+        project: Project,
+        goal: str,
+        *,
+        cancel_event: Event | None = None,
+        on_log: LogCallback | None = None,
+        on_progress: ProgressCallback | None = None,
+    ) -> InitDraft:
+        prompt = build_init_prompt(project, goal)
+        result = self._run_project_agent(
+            project, prompt, cancel_event, on_log, on_progress
+        )
+        draft = parse_init_output(project, goal, result.stdout)
+        self._attach_diagnostics(draft, result)
+        return draft
+
+    def revise_init_agent(
+        self,
+        project: Project,
+        previous_draft: InitDraft,
+        feedback: str,
+        *,
+        cancel_event: Event | None = None,
+        on_log: LogCallback | None = None,
+        on_progress: ProgressCallback | None = None,
+    ) -> InitDraft:
+        prompt = build_init_prompt(
+            project,
+            previous_draft.user_goal,
+            previous_draft=previous_draft,
+            feedback=feedback,
+        )
+        result = self._run_project_agent(
+            project, prompt, cancel_event, on_log, on_progress
+        )
+        draft = parse_init_output(
+            project,
+            previous_draft.user_goal,
+            result.stdout,
+            previous_draft=previous_draft,
+            feedback=feedback,
+        )
+        self._attach_diagnostics(draft, result)
+        return draft
+
+    def _run_project_agent(
+        self,
+        project: Project,
+        prompt: str,
+        cancel_event: Event | None,
+        on_log: LogCallback | None,
+        on_progress: ProgressCallback | None,
+    ) -> AgentRunResult:
+        result = self.run_agent(
+            "plan",
+            project.repo_path,
+            prompt,
+            cancel_event or Event(),
+            on_log or (lambda _message: None),
+            on_progress or (lambda _value, _message: None),
+        )
+        if not result.success:
+            detail = result.stderr.strip() or result.stdout.strip()
+            if detail:
+                detail = f" {detail[-2_000:]}"
+            raise RuntimeError(f"{result.summary}{detail}")
+        return result
+
+    @staticmethod
+    def _attach_diagnostics(
+        draft: RoadmapDraft | InitDraft, result: AgentRunResult
+    ) -> None:
+        draft.command = result.command
+        draft.stdout = result.stdout
+        draft.stderr = result.stderr
 
 
 def select_runner(

@@ -1,5 +1,75 @@
 # Nightly Log
 
+## June 14, 2026 - Production Project Workflow and IDE-style UI
+
+### Completed
+
+- Added `PRODUCT_REDESIGN.md` and Stage 12 to the roadmap.
+- Added explicit project resource status, project documents, repository
+  analysis, task completion summaries, and update suggestion models.
+- Added read-only detection for project docs, Python/Node markers, common
+  frameworks, Git state, missing Roadmap, and missing agent context.
+- Reworked New Project into Existing Project and New Project paths.
+- Added guided Roadmap and Init onboarding for new projects.
+- Replaced project cards plus the task rail with one expandable project tree.
+- Added first-class Project Overview, Roadmap, Init, and Task Detail views.
+- Added Roadmap edit, requirement, completion, reorder, import, export, agent,
+  and task-conversion actions.
+- Removed the permanent right inspector and removed Diff and Review pages.
+- Added resizable Terminal, Logs, Prompt, Output, Tests, and Problems bottom
+  tools with single-tool toggle behavior.
+- Added post-task Roadmap and Init suggestions that remain unapplied until user
+  acceptance.
+- Preserved mock, OpenCode, Git baseline, test, accept, reject, and agent review
+  workflows.
+
+### Safety
+
+- Existing project analysis and import do not write files.
+- Task completion never rewrites project documents.
+- Suggestion acceptance changes in-memory context only.
+- Roadmap export and Init apply retain existing confirmations and stale checks.
+
+### Verification
+
+- 49 tests pass, including focused analysis, project tree, bottom tools, removed
+  panels, Roadmap modification, and unapplied suggestion coverage.
+- Python compilation and whitespace checks pass.
+- A populated `1500x920` offscreen render was inspected.
+
+## June 14, 2026 - Agent-Driven Roadmap and Init Review
+
+### Completed
+
+- Added `PRODUCT_CORRECTION.md` and Stage 11 to the roadmap.
+- Replaced deterministic project templates with Roadmap and Init agent services.
+- Added `RoadmapDraft`, `InitDraft`, `ProposedFile`, statuses, feedback history,
+  timestamps, diagnostics, and accepted project state.
+- Added bounded repository context, safe `plan` prompts, strict JSON parsing,
+  and repository-aware mock drafts.
+- Added dedicated OpenCode generation and revision methods.
+- Added exact command logging plus separate stdout and stderr capture.
+- Added Roadmap and Init review dialogs with background workers.
+- Added roadmap acceptance, revision, regeneration, and accepted-only export.
+- Added Init proposal selection, content and diff preview, revision,
+  regeneration, draft export, and confirmed selected-file apply.
+- Added path validation, explicit overwrite approval, and stale-file detection.
+- Updated dashboard actions to `Create Roadmap` and `Run Init Agent`.
+
+### Verification
+
+- 41 unit, integration, workflow, agent, safety, and offscreen Qt tests pass.
+- Existing coding-task orchestration, Git baseline, test, accept, and reject
+  behavior remains covered.
+
+### Safety
+
+- Draft calls do not modify the repository.
+- Roadmaps cannot be exported before acceptance.
+- Init apply requires explicit confirmation and writes selected files only.
+- Existing Init targets require explicit approval and unchanged reviewed content.
+- Subprocesses remain argument-list based with `shell=False`.
+
 ## June 14, 2026 - UI/UX Redesign
 
 ### Completed

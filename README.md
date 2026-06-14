@@ -1,56 +1,57 @@
 # GoethePlaner
 
 GoethePlaner is a local PySide6 control center for OpenCode-based multi-agent
-coding work. Projects connect local repositories, tasks describe desired code
-changes, and specialized agents optimize prompts, plan work, implement changes,
-run tests, and review results without blocking the desktop UI.
+coding projects. It combines guided project onboarding, living Roadmap and Init
+context, task planning, safe agent execution, and IDE-style runtime tools.
 
 The application can run entirely in mock mode, so OpenCode is optional.
 
 ![GoethePlaner project dashboard](docs/goetheplaner-dashboard.png)
 
-The visual implementation follows [UI_SPEC.md](UI_SPEC.md). The generated design
-reference is available at [docs/ui-concept.png](docs/ui-concept.png).
-
 ## Workflow
 
 ```text
-Project
+Existing Project -> analyze docs and stack -> import or fill missing context
+New Project -> goal -> Roadmap review -> Init review -> first task
+
+Project Tree
+  -> Roadmap
+  -> Init
   -> Tasks
-    -> Prompt Optimizer, Planner, Backend, Frontend, Tester, Reviewer
-      -> Logs, Prompt, Subtasks, Changed Files, Diff, Tests, Review
+    -> selected agents
+      -> Terminal / Logs / Prompt / Output / Tests / Problems
+      -> reviewable Roadmap and Init update suggestions
 ```
 
-1. Create a project and select its local repository.
-2. Create a task inside the selected project.
-3. Choose `Auto`, `Mock`, or `OpenCode`.
-4. Monitor overall and per-agent progress.
-5. Inspect logs, optimized prompt, subtasks, changed files, diff, and tests.
-6. Accept or reject the generated result.
+1. Choose whether the project is existing or new.
+2. Review repository analysis or complete guided Roadmap and Init onboarding.
+3. Select the project, Roadmap, Init, or task from the left tree.
+4. Create a task directly under its project and choose execution mode.
+5. Monitor agents in the central task view and use bottom tool windows for
+   runtime detail.
+6. Accept or reject generated code changes.
+7. Explicitly accept or reject Roadmap and Init update suggestions.
 
 Projects and tasks are stored in memory in the current release.
 
 ## Features
 
-- Dark translucent project-first desktop dashboard
-- In-memory project navigation and task collections
-- Focused New Project and New Task dialogs
-- Central registry of 17 planning, engineering, data, security, quality, review,
-  and documentation agents
-- Rule-based Planner recommendations with manual agent selection
-- Project roadmap and safe initialization-plan generation
-- Plan view with optimized prompt, rationale, permissions, risk, and execution
-  graph
-- Parallel mock implementation stages with ordered tests, review, and docs
-- Per-agent activity, progress, log preview, elapsed time, and result state
-- Responsive `QThread` workflow with Qt signals and slots
-- Live stdout/stderr logs with source-aware colors
-- Configurable OpenCode CLI adapter
-- Automatic mock fallback when OpenCode is unavailable
-- Git status, changed-file, staged diff, and working-tree diff views
-- Background test command execution
-- Local accept action with no automatic commit or push
-- Confirmed reject action that preserves the captured dirty baseline
+- IDE-style project, Roadmap, Init, and task navigation tree
+- Existing-project analysis and guided new-project onboarding
+- First-class living Roadmap and Init resources
+- Read-only documentation and language/framework detection
+- Central registry of 17 professional agent roles
+- Deterministic Planner recommendations with manual selection
+- Agent-driven Roadmap and Init draft review
+- Parallel mock implementation and safe sequential real OpenCode execution
+- Per-agent status, progress, activity, logs, timing, and result state
+- PyCharm-style Terminal, Logs, Prompt, Output, Tests, and Problems tools
+- Reviewable post-task Roadmap and Init update suggestions
+- Git baseline capture, changed-file summary, safe accept, and confirmed reject
+- Responsive `QThread` workflows and streamed subprocess output
+
+Diff and Review are intentionally not exposed as pages in this phase. Changed
+file names remain available in Output, and safe Git reject behavior remains.
 
 ## Requirements
 
@@ -73,16 +74,14 @@ source .venv/bin/activate
 python -m agentboard
 ```
 
-The Python package retains the internal `agentboard` name for compatibility, but
-the desktop product name is GoethePlaner.
+The Python package retains the internal `agentboard` name for compatibility.
 
 ## Execution Modes
 
-- `Auto`: uses OpenCode when the configured executable is available and
-  otherwise uses the mock runner.
-- `Mock`: runs a simulated local workflow and never invokes OpenCode.
-- `OpenCode`: requires the configured OpenCode executable and reports a clear
-  error when it is unavailable.
+- `Auto`: uses OpenCode when available and otherwise uses mock mode.
+- `Mock`: uses repository-aware local simulation and never invokes OpenCode.
+- `OpenCode`: requires the configured executable and reports clear diagnostics
+  when unavailable.
 
 ## Configuration
 
@@ -90,78 +89,112 @@ the desktop product name is GoethePlaner.
 | --- | --- | --- |
 | `AGENTBOARD_OPENCODE_COMMAND` | OpenCode command template | `opencode run --dir {repo_path} --agent {agent_name} {prompt}` |
 | `AGENTBOARD_MOCK_DELAY` | Seconds per mock progress step | `0.2` |
-| `AGENTBOARD_TEST_COMMAND` | Initial test command shown in the UI | Empty |
-| `AGENTBOARD_OPENCODE_AGENT_MAP` | Optional JSON mapping from internal IDs to configured OpenCode agents | Empty |
+| `AGENTBOARD_TEST_COMMAND` | Initial test command | Empty |
+| `AGENTBOARD_OPENCODE_AGENT_MAP` | Optional internal-to-configured agent JSON | Empty |
 
-Supported OpenCode command placeholders:
+Supported command placeholders are `{repo_path}`, `{agent_name}`, and `{prompt}`.
+Commands are parsed into argument arrays and run with `shell=False`.
 
-- `{repo_path}`
-- `{agent_name}`
-- `{prompt}`
-
-Example:
-
-```bash
-export AGENTBOARD_TEST_COMMAND='python -m unittest discover -v'
-python -m agentboard
-```
-
-Command templates and test commands are parsed into argument arrays and executed
-with `shell=False`.
-
-Internal agent roles use only the built-in OpenCode agents `plan` and `build`
-unless `AGENTBOARD_OPENCODE_AGENT_MAP` explicitly configures another name:
+Internal roles map only to safe `plan` or `build` OpenCode agents unless an
+explicit mapping is configured:
 
 ```bash
 export AGENTBOARD_OPENCODE_AGENT_MAP='{"ml_engineer":"configured-ml"}'
 ```
 
-## Project Planning
+## Project Creation
 
-Each project can store a goal, generated roadmap, safe init plan, suggested next
-tasks, and task history in memory. Roadmap and init generation inspect repository
-markers and README context without writing files.
+### Existing Project
 
-The Init Plan view separates missing candidates from existing files. Applying
-selected candidates requires confirmation, creates only a fixed allowlist of
-missing files, and never overwrites an existing path. Exports use
-`ROADMAP.generated.md` or `INIT.generated.md` as suggestions and require explicit
-confirmation before replacing an existing export.
+GoethePlaner analyzes the selected folder without writing files. It detects
+README, ROADMAP, ROADMAP.generated, AGENTS, AGENT, CLAUDE, TODO, pyproject,
+package, and requirements files, common language/framework markers, Git state,
+missing important documents, and suggested next actions.
+
+The user chooses whether to import bounded document text into project context,
+create a missing Roadmap, run Init when agent context is missing, or review
+README improvements. Import never rewrites repository files.
+
+### New Project
+
+New projects require a name, target parent folder, and goal. Guided setup opens
+the Roadmap Agent review first, then the Init Agent review. The project appears
+in navigation only after the Roadmap is accepted and selected Init proposals
+are confirmed and applied.
+
+## Living Roadmap
+
+Roadmap is always visible below its project. It supports:
+
+- View, edit, and save
+- Ask Agent, revise, regenerate, and accept draft
+- Add or remove requirements
+- Mark checklist items complete
+- Move items up or down
+- Turn a requirement into a task
+- Import an existing Roadmap
+- Export an accepted Roadmap
+- Accept or reject post-task update suggestions
+
+Roadmap states include missing, imported, draft, accepted, needs-update,
+updated-after-task, and user-modified.
+
+## Living Init
+
+Init is always visible below its project. It represents project overview,
+commands, tests, architecture, conventions, agent instructions, limitations,
+important files, and current state.
+
+The Init Agent proposes complete file contents and diffs without writing. Apply
+requires selected files, confirmation, path-specific approval for updates, and
+a stale-file check. Init states include missing, imported, draft, accepted,
+stale, needs-update, updated-after-task, and user-modified.
+
+## Task Completion Updates
+
+Every completed task receives a completion summary. GoethePlaner then creates
+one pending Roadmap suggestion and one pending Init suggestion. Project context
+does not change until the user accepts a specific suggestion.
+
+Suggestion acceptance updates in-memory context only. Repository documentation
+still changes only through explicit Roadmap export or confirmed Init apply.
+
+## IDE Workspace
+
+The left tree is the single project and task navigator. The central workspace
+switches among Project Overview, Roadmap, Init, and Task Detail.
+
+The bottom strip contains `Terminal`, `Logs`, `Prompt`, `Output`, `Tests`, and
+`Problems`. Only one tool opens at a time, selecting the active tool hides it,
+and a vertical splitter controls its height.
 
 ## Agent Orchestration
 
-Task creation now includes a Plan step:
+Task creation includes a Plan step:
 
 1. Optimize the original prompt.
-2. Recommend specialized agents using deterministic keyword and domain rules.
-3. Review reasons, permissions, risk levels, and the execution graph.
+2. Recommend specialized agents with deterministic rules.
+3. Review rationale, permissions, risk, and execution graph.
 4. Enable or disable optional agents.
 5. Run the selected team.
 
 Mock mode runs independent implementation agents concurrently. Test Engineer,
 Code Reviewer, and Documentation Writer run afterward in dependency order. Real
-OpenCode mode runs all code-modifying stages sequentially in the shared working
-directory.
+OpenCode mode runs code-modifying stages sequentially in the shared repository.
 
 ## Safety
 
-- GoethePlaner does not store API keys.
-- It does not commit, push, reset a repository, or run a shell.
-- Accept only records a local decision.
-- A Git baseline is captured before executable agents start.
-- Real OpenCode agents never modify the same working directory concurrently.
-- Internal role names are not passed to OpenCode unless explicitly configured.
-- Roadmap and init generation are read-only.
-- Init apply never deletes or overwrites project files.
-- Reject restores tracked paths to that baseline.
-- Files created after the baseline are moved to
-  `<system temp>/agentboard-rejected/<task-id>/` instead of being deleted.
-- Pre-existing untracked and modified files are restored to their captured
-  content.
-
-Do not edit the same files outside GoethePlaner while a task is running.
-Concurrent edits made after baseline capture cannot be distinguished from agent
-changes.
+- No API keys are stored.
+- No shell is used.
+- No automatic commit, push, merge, or force push occurs.
+- Existing-project analysis and import are read-only.
+- Roadmap and Init draft generation are read-only.
+- Roadmaps are not exported before acceptance.
+- Init writes selected files only after confirmation.
+- Existing Init targets require overwrite confirmation and stale-file checks.
+- Task completion suggestions are never applied automatically.
+- A Git baseline preserves pre-existing repository changes.
+- Reject restores captured tracked paths and archives task-created files.
 
 ## Tests
 
@@ -170,36 +203,34 @@ source .venv/bin/activate
 QT_QPA_PLATFORM=offscreen python -m unittest discover -v
 ```
 
-The suite covers models, registry contents, planner selection, project
-generators, safe init apply, parallel stage ordering, OpenCode mapping, project
-ownership, dialogs, configuration, Git inspection, baseline restoration, test
-streaming, complete mock workflows, and headless Qt window construction.
+The suite covers repository analysis, lifecycle state, update suggestions,
+project-tree navigation, bottom tool toggling, removed panels, Roadmap
+modification, draft review, safe export/apply, agent selection, mock and real
+runner contracts, Git restoration, complete mock workflows, and headless Qt.
 
 ## Architecture
 
 ```text
 agentboard/
-  main.py
   app/
     ui/
-      theme.py          Centralized design tokens and QSS
-      components.py     Glass panels, badges, progress, empty states
-      sidebar.py        Project navigation
-      task_card.py      Task rail cards
-      agent_card.py     Live agent execution cards
-      dialogs.py        New Project and New Task flows
-      plan_view.py      Agent recommendation and manual selection UI
-      task_dashboard.py Main screen composition
+      sidebar.py          Project/resource/task tree
+      workspace_views.py Project, Roadmap, Init, and Task Detail
+      tool_windows.py     IDE-style bottom tools
+      dialogs.py          Existing/New Project and New Task flows
+      project_dialogs.py  Roadmap and Init agent review
+      task_dashboard.py   Application shell
     core/
-      agent_registry.py Professional role definitions and safe mappings
-      agent_selector.py Deterministic planner recommendations
-      roadmap_generator.py Read-only project roadmap generation
-      init_generator.py Read-only plan and confirmed exclusive creation
-      agent_dispatcher.py Parallel mock and sequential real execution
-      task_manager.py   Staged workflow orchestration
-    models/             Project, task, agent, and event state
-    utils/              Configuration and logging
-tests/
+      project_analysis.py Read-only repository analysis/import
+      project_updates.py  Reviewable completion suggestions
+      project_agents.py   Context, prompts, parsing, and mock drafts
+      task_manager.py     Staged workflow orchestration
+      git_manager.py      Baseline, inspection, and scoped reject
+    models/
+      project.py
+      project_lifecycle.py
+      task.py
 ```
 
-See [ROADMAP.md](ROADMAP.md) for milestones and safety boundaries.
+See [PRODUCT_REDESIGN.md](PRODUCT_REDESIGN.md), [UI_SPEC.md](UI_SPEC.md), and
+[ROADMAP.md](ROADMAP.md).

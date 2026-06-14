@@ -3,205 +3,90 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
-    QButtonGroup,
-    QFrame,
     QHBoxLayout,
     QLabel,
     QPushButton,
-    QScrollArea,
-    QSizePolicy,
+    QTreeWidget,
+    QTreeWidgetItem,
     QVBoxLayout,
-    QWidget,
 )
 
 from agentboard.app.models import Project
 
-from .components import GlassPanel, NavigationButton
-from .theme import THEME, rgba
+from .components import GlassPanel
+from .theme import THEME
 
+LOGO_PATH = (
+    Path(__file__).resolve().parents[3]
+    / "assets"
+    / "goetheplaner-logo-icon.png"
+)
 
-class ProjectRow(QFrame):
-    clicked = Signal(str)
-
-    def __init__(self, project: Project, parent=None) -> None:
-        super().__init__(parent)
-        self.setObjectName("projectRow")
-        self.project_id = project.id
-        self.selected = False
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.name_label = QLabel(project.name)
-        self.name_label.setStyleSheet("font-weight: 650;")
-        self.path_label = QLabel(self._short_path(project.repo_path))
-        self.path_label.setObjectName("mutedText")
-        self.path_label.setToolTip(str(project.repo_path))
-        self.path_label.setMaximumWidth(160)
-        self.path_label.setSizePolicy(
-            QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred
-        )
-        self.status_dot = QLabel("●")
-        self.status_dot.setAlignment(Qt.AlignmentFlag.AlignTop)
-        self.task_count = QLabel()
-        self.task_count.setObjectName("mutedText")
-
-        header = QHBoxLayout()
-        header.addWidget(self.name_label)
-        header.addStretch()
-        header.addWidget(self.task_count)
-        header.addWidget(self.status_dot)
-
-        footer = QHBoxLayout()
-        footer.addWidget(self.path_label, 1)
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(11, 9, 11, 9)
-        layout.setSpacing(4)
-        layout.addLayout(header)
-        layout.addLayout(footer)
-        self.update_project(project)
-
-    def update_project(self, project: Project) -> None:
-        self.name_label.setText(project.name)
-        self.path_label.setText(self._short_path(project.repo_path))
-        count = project.active_task_count
-        self.task_count.setText(
-            f"{count} active" if count else f"{len(project.tasks)} tasks"
-        )
-        self.status_dot.setStyleSheet(
-            f"color: {THEME.accent if count else THEME.text_muted};"
-            "font-size: 12px;"
-        )
-        self._apply_style()
-
-    def set_selected(self, selected: bool) -> None:
-        self.selected = selected
-        self._apply_style()
-
-    def _apply_style(self) -> None:
-        if self.selected:
-            background = rgba(THEME.accent, 22)
-            border = THEME.accent
-        else:
-            background = THEME.panel_alt
-            border = THEME.border
-        self.setStyleSheet(
-            "QFrame#projectRow {"
-            f"background-color: {background};"
-            f"border: 1px solid {border};"
-            "border-radius: 9px;"
-            "}"
-            "QFrame#projectRow:hover {"
-            f"background-color: {THEME.panel_hover};"
-            f"border-color: {THEME.border_strong};"
-            "}"
-            "QFrame#projectRow QLabel { background: transparent; border: none; }"
-        )
-
-    def mousePressEvent(self, event) -> None:
-        if event.button() == Qt.MouseButton.LeftButton:
-            self.clicked.emit(self.project_id)
-        super().mousePressEvent(event)
-
-    @staticmethod
-    def _short_path(path: Path) -> str:
-        text = str(path)
-        if len(text) <= 22:
-            return text
-        return f"…/{path.parent.name}/{path.name}"
+ITEM_KIND_ROLE = Qt.ItemDataRole.UserRole
+PROJECT_ID_ROLE = Qt.ItemDataRole.UserRole + 1
+ITEM_ID_ROLE = Qt.ItemDataRole.UserRole + 2
 
 
 class ProjectSidebar(GlassPanel):
     new_project_requested = Signal()
     project_selected = Signal(str)
+    task_selected = Signal(str)
+    navigation_selected = Signal(str, str, str)
+    new_task_requested = Signal(str)
+    settings_requested = Signal()
 
     def __init__(self, parent=None) -> None:
         super().__init__("sidebarPanel", parent)
-        self.project_rows: dict[str, ProjectRow] = {}
+        self.project_rows: dict[str, QTreeWidgetItem] = {}
+        self._selected_key: tuple[str, str, str] | None = None
 
-        mark = QLabel("G")
-        mark.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        mark.setFixedSize(36, 36)
-        mark.setStyleSheet(
-            f"background-color: {THEME.violet}; color: white;"
-            "border-radius: 10px; font-size: 18px; font-weight: 750;"
-        )
+        self.logo_label = QLabel()
+        self.logo_label.setObjectName("productLogo")
+        self.logo_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.logo_label.setFixedSize(40, 40)
+        logo = QPixmap(str(LOGO_PATH))
+        if logo.isNull():
+            self.logo_label.setText("G")
+            self.logo_label.setStyleSheet(
+                f"background-color: {THEME.violet}; color: white;"
+                "border-radius: 10px; font-size: 18px; font-weight: 750;"
+            )
+        else:
+            self.logo_label.setPixmap(
+                logo.scaled(
+                    self.logo_label.size(),
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation,
+                )
+            )
         product = QLabel("GoethePlaner")
         product.setObjectName("productName")
         brand = QHBoxLayout()
         brand.setSpacing(10)
-        brand.addWidget(mark)
+        brand.addWidget(self.logo_label)
         brand.addWidget(product)
         brand.addStretch()
 
-        self.new_project_button = QPushButton("+  New Project")
+        self.new_project_button = QPushButton("+ New Project")
         self.new_project_button.setObjectName("primaryButton")
         self.new_project_button.clicked.connect(self.new_project_requested)
 
-        self.navigation_group = QButtonGroup(self)
-        self.navigation_group.setExclusive(True)
-        self.projects_button = NavigationButton("▣   Projects")
-        self.recent_button = NavigationButton("◷   Recent")
-        self.settings_button = NavigationButton("⚙   Settings")
-        self.about_button = NavigationButton("ⓘ   About")
-        for button in (
-            self.projects_button,
-            self.recent_button,
-            self.settings_button,
-            self.about_button,
-        ):
-            self.navigation_group.addButton(button)
-        self.projects_button.setChecked(True)
+        label = QLabel("PROJECTS")
+        label.setObjectName("sectionLabel")
+        self.tree = QTreeWidget()
+        self.tree.setObjectName("projectTree")
+        self.tree.setHeaderHidden(True)
+        self.tree.setIndentation(18)
+        self.tree.setAnimated(True)
+        self.tree.setRootIsDecorated(True)
+        self.tree.setUniformRowHeights(False)
+        self.tree.itemClicked.connect(self._item_clicked)
 
-        projects_header = QHBoxLayout()
-        project_label = QLabel("PROJECTS")
-        project_label.setObjectName("sectionLabel")
-        add_button = QPushButton("+")
-        add_button.setObjectName("ghostButton")
-        add_button.setFixedWidth(32)
-        add_button.clicked.connect(self.new_project_requested)
-        projects_header.addWidget(project_label)
-        projects_header.addStretch()
-        projects_header.addWidget(add_button)
-
-        self.project_container = QWidget()
-        self.project_layout = QVBoxLayout(self.project_container)
-        self.project_layout.setContentsMargins(0, 0, 0, 0)
-        self.project_layout.setSpacing(8)
-        self.project_layout.addStretch()
-        project_scroll = QScrollArea()
-        project_scroll.setWidgetResizable(True)
-        project_scroll.setHorizontalScrollBarPolicy(
-            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
-        )
-        project_scroll.setWidget(self.project_container)
-
-        account = QFrame()
-        account.setObjectName("accountPanel")
-        account.setStyleSheet(
-            "QFrame#accountPanel {"
-            f"background-color: {THEME.background_elevated};"
-            f"border: 1px solid {THEME.border}; border-radius: 9px;"
-            "}"
-            "QFrame#accountPanel QLabel { background: transparent; border: none; }"
-        )
-        avatar = QLabel("LC")
-        avatar.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        avatar.setFixedSize(34, 34)
-        avatar.setStyleSheet(
-            f"background-color: {THEME.violet}; color: white;"
-            "border-radius: 17px; font-weight: 650;"
-        )
-        identity = QVBoxLayout()
-        identity.setSpacing(1)
-        identity.addWidget(QLabel("Local Workspace"))
-        local_label = QLabel("In-memory projects")
-        local_label.setObjectName("mutedText")
-        identity.addWidget(local_label)
-        account_layout = QHBoxLayout(account)
-        account_layout.setContentsMargins(10, 8, 10, 8)
-        account_layout.addWidget(avatar)
-        account_layout.addLayout(identity)
-        account_layout.addStretch()
+        self.settings_button = QPushButton("Settings")
+        self.settings_button.setObjectName("ghostButton")
+        self.settings_button.clicked.connect(self.settings_requested)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(14, 16, 14, 14)
@@ -209,34 +94,140 @@ class ProjectSidebar(GlassPanel):
         layout.addLayout(brand)
         layout.addSpacing(8)
         layout.addWidget(self.new_project_button)
-        layout.addSpacing(4)
-        layout.addWidget(self.projects_button)
-        layout.addWidget(self.recent_button)
-        layout.addWidget(self.settings_button)
-        layout.addWidget(self.about_button)
         layout.addSpacing(8)
-        layout.addLayout(projects_header)
-        layout.addWidget(project_scroll, 1)
-        layout.addWidget(account)
+        layout.addWidget(label)
+        layout.addWidget(self.tree, 1)
+        layout.addWidget(self.settings_button)
 
     def set_projects(
         self, projects: list[Project], selected_id: str | None
     ) -> None:
-        known = {project.id for project in projects}
-        for project_id in list(self.project_rows):
-            if project_id not in known:
-                row = self.project_rows.pop(project_id)
-                self.project_layout.removeWidget(row)
-                row.deleteLater()
-
+        expanded = {
+            item.data(0, PROJECT_ID_ROLE)
+            for index in range(self.tree.topLevelItemCount())
+            if (item := self.tree.topLevelItem(index)).isExpanded()
+        }
+        self.tree.clear()
+        self.project_rows.clear()
+        selected_item: QTreeWidgetItem | None = None
         for project in projects:
-            row = self.project_rows.get(project.id)
-            if row is None:
-                row = ProjectRow(project)
-                row.clicked.connect(self.project_selected)
-                self.project_rows[project.id] = row
-                self.project_layout.insertWidget(
-                    max(0, self.project_layout.count() - 1), row
+            root = self._item(
+                project.name,
+                "project",
+                project.id,
+                project.id,
+            )
+            root.setToolTip(
+                0,
+                f"{project.repo_path}\n"
+                f"Roadmap: {project.roadmap_status}\n"
+                f"Init: {project.init_status}",
+            )
+            font = root.font(0)
+            font.setBold(True)
+            root.setFont(0, font)
+            self.tree.addTopLevelItem(root)
+            self.project_rows[project.id] = root
+
+            roadmap = self._item(
+                f"Roadmap  [{project.roadmap_status}]",
+                "roadmap",
+                project.id,
+                "roadmap",
+            )
+            init = self._item(
+                f"Init  [{project.init_status}]",
+                "init",
+                project.id,
+                "init",
+            )
+            tasks = self._item(
+                f"Tasks  ({len(project.tasks)})",
+                "tasks",
+                project.id,
+                "tasks",
+            )
+            root.addChildren([roadmap, init, tasks])
+            for task in project.tasks:
+                task_item = self._item(
+                    f"{task.title}  [{task.status.value}]",
+                    "task",
+                    project.id,
+                    task.id,
                 )
-            row.update_project(project)
-            row.set_selected(project.id == selected_id)
+                task_item.setToolTip(0, task.original_prompt)
+                tasks.addChild(task_item)
+                if self._selected_key == (
+                    project.id,
+                    "task",
+                    task.id,
+                ):
+                    selected_item = task_item
+            new_task = self._item(
+                "+ New Task",
+                "new_task",
+                project.id,
+                "new_task",
+            )
+            tasks.addChild(new_task)
+
+            should_expand = (
+                project.id in expanded
+                or not expanded
+                or project.id == selected_id
+            )
+            root.setExpanded(should_expand)
+            tasks.setExpanded(should_expand)
+            if self._selected_key == (
+                project.id,
+                "roadmap",
+                "roadmap",
+            ):
+                selected_item = roadmap
+            elif self._selected_key == (
+                project.id,
+                "init",
+                "init",
+            ):
+                selected_item = init
+            elif self._selected_key == (
+                project.id,
+                "project",
+                project.id,
+            ):
+                selected_item = root
+            elif selected_id == project.id and self._selected_key is None:
+                selected_item = root
+
+        if selected_item is not None:
+            self.tree.setCurrentItem(selected_item)
+
+    def select_item(
+        self, project_id: str, kind: str, item_id: str = ""
+    ) -> None:
+        self._selected_key = (project_id, kind, item_id or kind)
+
+    def _item(
+        self, text: str, kind: str, project_id: str, item_id: str
+    ) -> QTreeWidgetItem:
+        item = QTreeWidgetItem([text])
+        item.setData(0, ITEM_KIND_ROLE, kind)
+        item.setData(0, PROJECT_ID_ROLE, project_id)
+        item.setData(0, ITEM_ID_ROLE, item_id)
+        return item
+
+    def _item_clicked(self, item: QTreeWidgetItem, _column: int) -> None:
+        kind = str(item.data(0, ITEM_KIND_ROLE) or "")
+        project_id = str(item.data(0, PROJECT_ID_ROLE) or "")
+        item_id = str(item.data(0, ITEM_ID_ROLE) or "")
+        if not project_id:
+            return
+        if kind == "new_task":
+            self.new_task_requested.emit(project_id)
+            return
+        self._selected_key = (project_id, kind, item_id)
+        self.navigation_selected.emit(project_id, kind, item_id)
+        if kind == "project":
+            self.project_selected.emit(project_id)
+        elif kind == "task":
+            self.task_selected.emit(item_id)

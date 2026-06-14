@@ -194,6 +194,19 @@ class WorkflowWorker(QObject):
             "Collecting final agent results and repository state.",
             "GoethePlaner",
         )
+        completed_agents = [
+            agent.name
+            for agent in self.task.agents
+            if agent.status == AgentStatus.DONE
+        ]
+        self.task.completion_summary = (
+            f"Completed {len(completed_agents)} agent stage(s)"
+            + (
+                f": {', '.join(completed_agents)}."
+                if completed_agents
+                else "."
+            )
+        )
         self.task.finish(TaskStatus.COMPLETED)
         self.task_changed.emit(self.task.status.value, 100)
         self._emit_event(

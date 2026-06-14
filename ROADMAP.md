@@ -165,10 +165,10 @@ Verification: the documented launch path works and the complete test suite passe
 
 ## Current Status
 
-- Active stage: Stage 10, advanced orchestration complete
-- Last completed stage: Stage 10, Advanced Agent Planning and Project
-  Orchestration
-- Advanced orchestration completed: June 14, 2026
+- Active stage: Stage 12 complete
+- Last completed stage: Stage 12, Production-grade Project Workflow and
+  IDE-style UI Redesign
+- Stage 12 completed: June 14, 2026
 
 ## Stage 9: UI/UX Redesign
 
@@ -285,4 +285,123 @@ This phase follows [AGENT_SPEC.md](AGENT_SPEC.md) and
 - Internal roles map to `plan` or `build` unless explicitly configured.
 - Roadmap and init generation are read-only; init apply uses exclusive creation.
 - Project planning and task Plan views were rendered and visually inspected.
+- Completed: June 14, 2026.
+
+## Stage 11: Agent-driven Roadmap and Init Review Workflow
+
+This phase corrects the template-based project generators described in
+[PRODUCT_CORRECTION.md](PRODUCT_CORRECTION.md).
+
+### Phase 11.1: Product and safety contract
+
+- [x] Document why immediate template generation was the wrong product model.
+- [x] Define agent draft, review, revision, acceptance, export, and apply
+  boundaries.
+- [x] Make overwrite protection and read-only draft behavior explicit.
+
+### Phase 11.2: Draft models and OpenCode integration
+
+- [x] Add `RoadmapDraft`, `InitDraft`, and `ProposedFile` models.
+- [x] Add safe Roadmap and Init agent prompts with bounded repository context.
+- [x] Add real OpenCode structured-output parsing and realistic mock behavior.
+- [x] Capture exact commands, stdout, stderr, progress, and diagnostics.
+
+### Phase 11.3: Roadmap review workflow
+
+- [x] Replace one-click generation with goal and constraints input.
+- [x] Show roadmap content, reasoning, observations, milestones, tasks, risks,
+  tests, and logs.
+- [x] Support feedback revision, regeneration, acceptance, and safe export.
+
+### Phase 11.4: Init review workflow
+
+- [x] Replace generic init templates with repository-aware file proposals.
+- [x] Show selectable files, status, content preview, and unified diff.
+- [x] Support feedback revision, regeneration, draft export, and confirmed apply.
+- [x] Require explicit confirmation before updating every existing target.
+
+### Phase 11.5: Verification and handoff
+
+- [x] Add focused model, prompt, revision, export, apply, mock, and UI tests.
+- [x] Preserve the existing task workflow and complete test suite.
+- [x] Update README, agent specification, project workflow, UI specification,
+  and nightly log.
+- [x] Run tests, compilation, and whitespace checks.
+
+| Milestone | Definition | Status |
+| --- | --- | --- |
+| M8 Agent-reviewed project planning | OpenCode-backed roadmap and init drafts with human acceptance gates | Complete |
+
+### Agent Review Verification
+
+- 41 unit, integration, workflow, agent, safety, and offscreen Qt tests pass.
+- Python compilation and whitespace checks pass.
+- Populated Roadmap and Init review dialogs were rendered and inspected.
+- Existing coding-task, Git baseline, test, accept, and reject workflows remain
+  covered.
+- Completed: June 14, 2026.
+
+## Stage 12: Production-grade Project Workflow and IDE-style UI Redesign
+
+This phase follows [PRODUCT_REDESIGN.md](PRODUCT_REDESIGN.md).
+
+### Phase 12.1: Product and lifecycle contract
+
+- [x] Document the corrected creation, Roadmap, Init, task-completion, navigation,
+  tool-window, model, and safety contracts.
+- [x] Define explicit acceptance criteria.
+
+### Phase 12.2: Project analysis and onboarding
+
+- [x] Distinguish existing and new project creation.
+- [x] Analyze documentation and language/framework markers without writes.
+- [x] Add guided Roadmap and Init onboarding for new projects.
+- [x] Add explicit import and missing-context choices for existing projects.
+
+### Phase 12.3: Project lifecycle models
+
+- [x] Add project documents, lifecycle status, analysis state, completion
+  summaries, and update suggestions.
+- [x] Keep current project, task, draft, mock, and OpenCode contracts compatible.
+
+### Phase 12.4: IDE navigation and workspace
+
+- [x] Replace project cards and the task rail with one project/resource/task tree.
+- [x] Add project overview, Roadmap, Init, and task detail workspace views.
+- [x] Make Roadmap and Init permanently accessible under every project.
+
+### Phase 12.5: Bottom tool windows
+
+- [x] Remove the permanent right-side inspector.
+- [x] Remove Diff and Review pages from the product surface.
+- [x] Add resizable Terminal, Logs, Prompt, Output, Tests, and Problems tools.
+- [x] Enforce one visible bottom tool and same-button hide behavior.
+
+### Phase 12.6: Living Roadmap and Init
+
+- [x] Add Roadmap edit, requirement, completion, reorder, import, export, agent
+  revision, and task-conversion actions.
+- [x] Generate Roadmap and Init suggestions after task completion.
+- [x] Require explicit acceptance or rejection for every suggestion.
+
+### Phase 12.7: Verification and handoff
+
+- [x] Add focused project analysis, tree navigation, tool-window, lifecycle, and
+  suggestion tests.
+- [x] Preserve existing orchestration, Git, test, mock, and OpenCode coverage.
+- [x] Update README, UI specification, project workflow, and nightly log.
+- [x] Run the complete offscreen test suite, compilation, and whitespace checks.
+
+| Milestone | Definition | Status |
+| --- | --- | --- |
+| M9 Production project workflow | Guided onboarding, living project context, IDE navigation, and bottom tools | Complete |
+
+### Production Redesign Verification
+
+- 49 unit, integration, workflow, lifecycle, safety, and offscreen Qt tests pass.
+- Python compilation and whitespace checks pass.
+- Existing mock, OpenCode mapping, staged execution, Git baseline, test, accept,
+  reject, Roadmap Agent, and Init Agent behavior remains covered.
+- A populated `1500x920` render was inspected with the project tree, Roadmap
+  workspace, pending suggestions, and bottom tool strip.
 - Completed: June 14, 2026.

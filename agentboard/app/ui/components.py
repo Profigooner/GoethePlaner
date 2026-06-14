@@ -30,6 +30,14 @@ _STATUS_COLORS = {
     "Cancelled": THEME.warning,
     "Active": THEME.success,
     "Idle": THEME.text_muted,
+    "missing": THEME.text_muted,
+    "imported": THEME.violet,
+    "draft": THEME.warning,
+    "accepted": THEME.success,
+    "stale": THEME.warning,
+    "needs_update": THEME.warning,
+    "updated_after_task": THEME.success,
+    "user_modified": THEME.accent,
 }
 
 
@@ -167,4 +175,3 @@ class NavigationButton(QPushButton):
             f"color: {THEME.text_primary};"
             "}"
         )
-
